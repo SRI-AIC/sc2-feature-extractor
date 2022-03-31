@@ -1,0 +1,320 @@
+{
+  "py/object": "feature_extractor.config.FeatureExtractorConfig",
+  "sample_int": 1,
+  "friendly_id": 1,
+  "groups": {
+    "All": [
+      "Terran.Marine",
+      "Zerg.Roach"
+    ]
+  },
+  "unit_costs": {
+    "Terran.Marine": [
+      50,
+      0
+    ],
+    "Zerg.Roach": [
+      75,
+      25
+    ]
+  },
+  "max_friendly_units": {
+    "Terran.Marine": 14
+  },
+  "max_enemy_units": {
+    "Zerg.Roach": 9
+  },
+  "unit_group_friendly_filter": [
+    "Terran.Marine"
+  ],
+  "unit_group_enemy_filter": [
+    "Zerg.Roach"
+  ],
+  "distance_friendly_filter": [
+    "Terran.Marine"
+  ],
+  "distance_enemy_filter": [
+    "Zerg.Roach"
+  ],
+  "melee_range_ratio": 0.1,
+  "close_range_ratio": 0.2,
+  "far_range_ratio": 0.85,
+  "concentration_friendly_filter": [
+    "Terran.Marine"
+  ],
+  "concentration_enemy_filter": [
+    "Zerg.Roach"
+  ],
+  "compact_ratio": 0.1,
+  "spread_ratio": 0.4,
+  "scattered_ratio": 0.85,
+  "force_factors": [
+    {
+      "py/object": "feature_extractor.config.ForceFactorConfig",
+      "factor": "is_on_screen",
+      "name": "Size",
+      "op": "sum",
+      "friendly_filter": [
+        "Terran.Marine"
+      ],
+      "enemy_filter": [
+        "Zerg.Roach"
+      ],
+      "levels": [
+        {
+          "name": "Undefined",
+          "value": 0
+        },
+        {
+          "name": "Small",
+          "value": 2
+        },
+        {
+          "name": "Medium",
+          "value": 6
+        },
+        {
+          "name": "Large",
+          "value": 10
+        }
+      ]
+    },
+    {
+      "py/object": "feature_extractor.config.ForceFactorConfig",
+      "factor": "health_ratio",
+      "name": "Health",
+      "op": "mean",
+      "friendly_filter": [
+        "Terran.Marine"
+      ],
+      "enemy_filter": [
+        "Zerg.Roach"
+      ],
+      "levels": [
+        {
+          "name": "Undefined",
+          "value": 0
+        },
+        {
+          "name": "Weak",
+          "value": 100
+        },
+        {
+          "name": "Medium",
+          "value": 175
+        },
+        {
+          "name": "Healthy",
+          "value": 255
+        }
+      ]
+    }
+  ],
+  "force_relative_factors": [
+    {
+      "py/object": "feature_extractor.config.ForceRelativeFactorConfig",
+      "factor": "total_cost",
+      "name": "Cost",
+      "friendly_filter": [
+        "Terran.Marine"
+      ],
+      "enemy_filter": [
+        "Zerg.Roach"
+      ],
+      "ratio": 0.90,
+      "advantage": "advantage",
+      "disadvantage": "disadvantage",
+      "balanced": "balanced"
+    },
+    {
+      "py/object": "feature_extractor.config.ForceRelativeFactorConfig",
+      "factor": "is_on_screen",
+      "name": "Size",
+      "friendly_filter": [
+        "Terran.Marine"
+      ],
+      "enemy_filter": [
+        "Zerg.Roach"
+      ],
+      "ratio": 0.75,
+      "advantage": "majority",
+      "disadvantage": "minority",
+      "balanced": "balanced"
+    }
+  ],
+  "under_attack_friendly_filter": [
+    "Terran.Marine"
+  ],
+  "under_attack_enemy_filter": [
+    "Zerg.Roach"
+  ],
+  "elevation_friendly_filter": [
+  ],
+  "elevation_enemy_filter": [
+  ],
+  "low_elevation": 3,
+  "medium_elevation": 10,
+  "high_elevation": 20,
+  "friendly_move_friendly_filter": [
+    "Terran.Marine"
+  ],
+  "friendly_move_enemy_filter": [
+    "Zerg.Roach"
+  ],
+  "enemy_move_enemy_filter": [
+    "Zerg.Roach"
+  ],
+  "enemy_move_friendly_filter": [
+    "Terran.Marine"
+  ],
+  "velocity_threshold": 0.5,
+  "max_velocity": 3.0,
+  "advance_angle_thresh": [
+    0,
+    1.15
+  ],
+  "retreat_angle_thresh": [
+    2.0,
+    3.15
+  ],
+  "between_friendly_filter": [
+  ],
+  "between_enemy_filter": [
+  ],
+  "between_barrier_filter": [
+  ],
+  "between_units_ratio": 0.25,
+  "barrier_angle_threshold": 0.1,
+  "friendly_orders": [
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "MoveOrder",
+      "unit_group_filter": [
+        "Terran.Marine"
+      ],
+      "raw_abilities": [
+        10,
+        11,
+        13,
+        14,
+        545,
+        546,
+        547,
+        548
+      ]
+    },
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "AttackOrder",
+      "unit_group_filter": [
+        "Terran.Marine"
+      ],
+      "raw_abilities": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        539,
+        540
+      ]
+    },
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "RepairOrder",
+      "unit_group_filter": [
+        "Terran.Marine"
+      ],
+      "raw_abilities": [
+        324,
+        325,
+        326,
+        327,
+        328,
+        329,
+        330,
+        108,
+        109
+      ]
+    },
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "NoOpOrder",
+      "unit_group_filter": [
+        "Terran.Marine"
+      ],
+      "raw_abilities": [
+        0
+      ]
+    }
+  ],
+  "enemy_orders": [
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "MoveOrder",
+      "unit_group_filter": [
+        "Zerg.Roach"
+      ],
+      "raw_abilities": [
+        10,
+        11,
+        13,
+        14,
+        545,
+        546,
+        547,
+        548
+      ]
+    },
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "AttackOrder",
+      "unit_group_filter": [
+        "Zerg.Roach"
+      ],
+      "raw_abilities": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        539,
+        540
+      ]
+    },
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "RepairOrder",
+      "unit_group_filter": [
+        "Zerg.Roach"
+      ],
+      "raw_abilities": [
+        324,
+        325,
+        326,
+        327,
+        328,
+        329,
+        330,
+        108,
+        109
+      ]
+    },
+    {
+      "py/object": "feature_extractor.config.OrderConfig",
+      "name": "NoOpOrder",
+      "unit_group_filter": [
+        "Zerg.Roach"
+      ],
+      "raw_abilities": [
+        0
+      ]
+    }
+  ]
+}
