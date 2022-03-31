@@ -31,7 +31,7 @@
   - [Usage](#usage-3)
   - [Output](#output-3)
 - [Examples](#examples)
-- [License notice](#license-notice)
+- [License Notice](#license-notice)
 - [Support](#support)
 - [Acknowledgements](#acknowledgements)
 
@@ -598,4 +598,4 @@ If you have questions about using this package or find errors in the code you ca
 
 # Acknowledgements
 
-This material is based upon work supported by the Defense Advanced Research Projects Agency (DARPA) under Contract No. HR001119C0112.CA
+This material is based upon work supported by the Defense Advanced Research Projects Agency (DARPA) under Contract No. HR001119C0112.
