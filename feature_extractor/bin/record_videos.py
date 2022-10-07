@@ -17,7 +17,7 @@ from feature_extractor.util.screen import get_window, get_window_image
 
 __author__ = 'Pedro Sequeira'
 __email__ = 'pedro.sequeira@sri.com'
-__description__ = "Loads replays and saves a video file of the main game screen for each replay and episode therein."
+__description__ = 'Loads replays and saves a video file of the main game screen for each replay and episode therein.'
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('output', 'output', 'Path to the directory in which to save the video files.')

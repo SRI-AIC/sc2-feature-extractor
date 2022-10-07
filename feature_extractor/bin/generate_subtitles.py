@@ -42,7 +42,7 @@ def main():
     parser.add_argument('--features', '-f', type=str, nargs='+', default=None,
                         help='The list of features to write as subtitles. `None` will write all features to file.')
 
-    parser.add_argument('--processes', '-p', type=int, default=-1,
+    parser.add_argument('--parallel', '-p', type=int, default=-1,
                         help='The number of parallel processes to use. A value of `-1` or `None` '
                              'will use all available CPUs.')
     parser.add_argument('--clear', '-c', type=str2bool, help='Clear output directories before generating results.')
@@ -71,7 +71,7 @@ def main():
         features = [f for f in features_df.columns if f not in {REPLAY_FILE_STR, TIME_STEP_STR, EPISODE_STR}]
     fn_args = [(df, os.path.join(out_dir, f'{get_file_name_without_extension(file)}.{FILE_EXTENSION}'), features)
                for file, df in features_df.groupby(REPLAY_FILE_STR)]
-    run_parallel(_generate_subs, fn_args, args.processes, use_tqdm=True)
+    run_parallel(_generate_subs, fn_args, args.parallel, use_tqdm=True)
 
     logging.info('Done!')
 

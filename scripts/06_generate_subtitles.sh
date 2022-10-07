@@ -30,6 +30,6 @@ python -m feature_extractor.bin.generate_subtitles \
   --input=$INPUT_FILE \
   --output=$OUTPUT_DIR \
   --features $FEATURES \
-  --processes=$PARALLEL \
+  --parallel=$PARALLEL \
   --verbosity=$VERBOSITY \
   --clear=$CLEAR
