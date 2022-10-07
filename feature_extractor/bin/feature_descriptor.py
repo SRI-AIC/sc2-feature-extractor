@@ -4,7 +4,7 @@ import json
 from absl import app, flags
 from feature_extractor.bin.extract_features import _create_extractors
 from feature_extractor.config import FeatureExtractorConfig
-from feature_extractor.extractors import FRIENDLY_STR, ENEMY_STR, MetaExtractor
+from feature_extractor.extractors import FRIENDLY_STR, ENEMY_STR, MetaExtractor, FeatureType
 from feature_extractor.extractors.orders import _OrdersExtractor
 from feature_extractor.extractors.factors.under_attack import UnderAttackExtractor
 from feature_extractor.extractors.location.movement import FriendlyRelativeMovementExtractor
@@ -46,7 +46,7 @@ def main(unused_argv):
 
     # creates feature extractors
     meta_extractor = MetaExtractor(config)
-    extractors = _create_extractors(meta_extractor, args.categorical)
+    extractors = _create_extractors(meta_extractor)
 
     # get the descriptors
     feat_extractors = extractors[FRIENDLY_STR] + extractors[ENEMY_STR]
@@ -58,13 +58,16 @@ def main(unused_argv):
         feat_desc = feat_extractor.features_descriptors()
         if isinstance(feat_extractor, MetaExtractor):
             meta_feat_desc = feat_desc
-        elif isinstance(feat_extractor, ACTION_FEATURE_EXTRACTORS) and \
-                not any('enemy' in f.name.lower() for f in feat_desc):
+        elif isinstance(feat_extractor, ACTION_FEATURE_EXTRACTORS):
             # extracts units/groups from name
             for fd in feat_desc:
+                if ENEMY_STR in fd.name or fd.feature_type != FeatureType.Boolean:
+                    condition_feat_desc.append(fd)  # not a friendly (Boolean) action
+                    continue
+                # extracts unit group name from feature label
                 unit_group = None
                 for g in all_groups:
-                    if f'{FRIENDLY_STR}_{g}' in fd.name or f'Target_{g}' in fd.name:
+                    if f'{FRIENDLY_STR}_{g}' in fd.name:
                         unit_group = g
                         break
                 if unit_group is None:
@@ -74,12 +77,14 @@ def main(unused_argv):
                     tactics_feat_desc[unit_group] = []
                 tactics_feat_desc[unit_group].append(fd)
         elif 'Blue' in all_groups and isinstance(feat_extractor, UnderAttackExtractor):
-            # extracts enemy under-attack as tactics features
+            # extracts friendly attacking (enemy under-attack) as tactics features
             for fd in feat_desc:
-                if ENEMY_STR in fd.name:
+                if FRIENDLY_STR in fd.name and fd.feature_type == FeatureType.Boolean:
                     if 'Blue' not in tactics_feat_desc:
                         tactics_feat_desc['Blue'] = []
                     tactics_feat_desc['Blue'].append(fd)
+                else:
+                    condition_feat_desc.append(fd)  # not a friendly (Boolean) action
         else:
             condition_feat_desc.extend(feat_desc)
 

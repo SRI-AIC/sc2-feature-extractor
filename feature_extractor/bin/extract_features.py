@@ -38,8 +38,6 @@ point_flag.DEFINE_point('feature_minimap_size', 64, 'Resolution for minimap feat
 flags.DEFINE_integer('feature_camera_width', 24, 'Width of the feature layer camera.')
 flags.DEFINE_string('action_space', 'RAW', 'Action space for agent interface format.')
 
-flags.DEFINE_bool('categorical', True, 'Whether to extract categorical features. If `False`, then'
-                                       'continuous/numerical features will be computed where possible.')
 flags.DEFINE_string('config', None, 'Path to the feature extractor configuration file.')
 flags.DEFINE_integer('amount', None, 'Number of replays for which to extract features (selected '
                                      'from the list of replays).')
@@ -55,22 +53,21 @@ PICKLE_DATASET_FILE = 'feature-dataset.pkl.gz'
 SEPARATE_DATASET_FILE = 'all-traces.tar.gz'
 
 
-def _create_extractors(meta_extractor: MetaExtractor,
-                       categorical: bool) -> Dict[str, List[FeatureExtractor]]:
+def _create_extractors(meta_extractor: MetaExtractor) -> Dict[str, List[FeatureExtractor]]:
     config = meta_extractor.config
     return {
         FRIENDLY_STR: [
             meta_extractor,
-            UnitGroupExtractor(config, categorical),
-            DistanceExtractor(config, categorical),
-            ConcentrationExtractor(config, categorical),
-            ForceFactorsExtractor(config, categorical),
-            ForceRelativeFactorsExtractor(config, categorical),
-            UnderAttackExtractor(config, categorical),
-            ElevationExtractor(config, categorical),
-            FriendlyRelativeMovementExtractor(config, categorical),
-            EnemyRelativeMovementExtractor(config, categorical),
-            BetweenExtractor(config, categorical),
+            UnitGroupExtractor(config),
+            DistanceExtractor(config),
+            ConcentrationExtractor(config),
+            ForceFactorsExtractor(config),
+            ForceRelativeFactorsExtractor(config),
+            UnderAttackExtractor(config),
+            ElevationExtractor(config),
+            FriendlyRelativeMovementExtractor(config),
+            EnemyRelativeMovementExtractor(config),
+            BetweenExtractor(config),
             FriendlyOrdersExtractor(config),
         ],
         ENEMY_STR: [
@@ -116,7 +113,7 @@ def main(unused_argv):
 
     # creates feature extractors
     meta_extractor = MetaExtractor(config)
-    extractors = _create_extractors(meta_extractor, args.categorical)
+    extractors = _create_extractors(meta_extractor)
 
     listener = ExtractorListener(meta_extractor, extractors, temp_dir)
     extractor = ExtractorProcessor(listener, aif)

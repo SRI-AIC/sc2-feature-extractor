@@ -3,7 +3,6 @@ import logging
 import os
 import re
 import sys
-import tqdm
 import numpy as np
 import pandas as pd
 from typing import Tuple, Union, Dict, Optional
@@ -12,7 +11,7 @@ from pandas.core.groupby import DataFrameGroupBy
 from feature_extractor import merge_feature_files
 from feature_extractor.extractors import TIME_STEP_STR, EPISODE_STR, REPLAY_FILE_STR
 from feature_extractor.util.logging import change_log_handler
-from feature_extractor.util.mp import get_pool_and_map
+from feature_extractor.util.mp import run_parallel
 from feature_extractor.util.plot import plot_bar, dummy_plotly, plot_histogram
 from feature_extractor.util.io import get_files_with_extension, create_clear_dir, get_file_changed_extension
 
@@ -224,11 +223,8 @@ def main(unused_argv):
                               first_dir, last_dir, all_steps_dir, all_eps_dir, sequence_dir, args.format))
 
     # processes features in parallel
-    pool, map_func = get_pool_and_map(None if args.parallel <= 0 else args.parallel, star=True, iterator=True)
-    list(tqdm.tqdm(map_func(_plot_feature_stats, feat_args), total=len(feat_args)))
-    if pool is not None:
-        pool.close()
-
+    logging.info(f'Extracting feature stats for {len(feat_args)} features...')
+    run_parallel(_plot_feature_stats, feat_args, args.parallel, use_tqdm=True)
     logging.info(f'Finished processing {len(feat_args)} features ({len(df[EPISODE_STR].unique())} episodes)!')
 
 
