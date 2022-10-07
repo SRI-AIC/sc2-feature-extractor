@@ -41,6 +41,7 @@
   - [Usage](#usage-5)
   - [Output](#output-5)
 - [Examples](#examples)
+- [Citing](#citing)
 - [License Notice](#license-notice)
 - [Support](#support)
 - [Acknowledgements](#acknowledgements)
@@ -750,6 +751,23 @@ The following scripts are included:
 - `06_generate_subtitles.sh`: generates subtitle files from a feature dataset.
 
 ---
+
+# Citing
+
+Please cite the [paper](https://arxiv.org/abs/2208.08552) if you use this code in your research:
+
+```latex
+@misc{https://doi.org/10.48550/arxiv.2208.08552,
+  doi = {10.48550/ARXIV.2208.08552},
+  url = {https://arxiv.org/abs/2208.08552},
+  author = {Sequeira, Pedro and Elenius, Daniel and Hostetler, Jesse and Gervasio, Melinda},
+  keywords = {Artificial Intelligence (cs.AI), Human-Computer Interaction (cs.HC), Machine Learning (cs.LG), Logic in Computer Science (cs.LO), FOS: Computer and information sciences, FOS: Computer and information sciences},
+  title = {A Framework for Understanding and Visualizing Strategies of RL Agents},
+  publisher = {arXiv},
+  year = {2022}, 
+  copyright = {arXiv.org perpetual, non-exclusive license}
+}
+```
 
 # License Notice
 
