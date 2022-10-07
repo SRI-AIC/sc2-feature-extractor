@@ -12,6 +12,7 @@ setup(name='sc2-feature-extractor',
       scripts=[
       ],
       install_requires=[
+          'protobuf == 3.20.1',
           'pysc2',
           'numpy',
           'pandas',
@@ -22,7 +23,16 @@ setup(name='sc2-feature-extractor',
           'matplotlib',
           'plotly',
           'kaleido',
-          'scikit-video >= 1.1.11'
+          'scikit-video >= 1.1.11',
+          'joblib'
       ],
+      extras_require={
+          'macos': [
+              'pyobjc-framework-Quartz'
+          ],
+          'windows': [
+              'pywin32'
+          ],
+      },
       zip_safe=True
       )
