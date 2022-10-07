@@ -21,7 +21,7 @@ CLEAR=true       # whether to clear output directories before generating results
 
 # change to project root directory (in case invoked from other dir)
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-cd "$DIR/../.." || exit
+cd "$DIR/.." || exit
 clear
 
 # run feature descriptor

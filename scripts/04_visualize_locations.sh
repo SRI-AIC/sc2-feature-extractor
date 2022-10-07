@@ -8,7 +8,7 @@
 
 # DIRECTORIES
 REPLAYS_DIR="$SC2PATH/Replays/DefeatRoaches"
-FEATURES_CONF="feature-extractor/config/roaches.json"
+FEATURES_CONF="config/roaches.json"
 OUTPUT_DIR="output/minigames/roaches/visualizer"
 
 # OPTIONS
@@ -24,14 +24,14 @@ CLEAR=true                   # whether to clear output directories before genera
 
 # change to project root directory (in case invoked from other dir)
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-cd "$DIR/../.." || exit
+cd "$DIR/.." || exit
 clear
 
 # run reply visualizer
 echo "========================================"
 echo "Visualizing unit locations for replays in '$REPLAYS_DIR'..."
 python -m feature_extractor.bin.visualize_locations \
-  --replays=$REPLAYS_DIR \
+  --replays="$REPLAYS_DIR" \
   --replay_sc2_version=$SC2_VERSION \
   --config=$FEATURES_CONF \
   --output=$OUTPUT_DIR \

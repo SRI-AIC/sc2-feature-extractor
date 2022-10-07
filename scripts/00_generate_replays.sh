@@ -15,7 +15,7 @@ AGENT=pysc2.agents.scripted_agent.DefeatRoaches
 
 # change to project root directory (in case invoked from other dir)
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-cd "$DIR/../.." || exit
+cd "$DIR/.." || exit
 clear
 
 echo "========================================"
