@@ -1,13 +1,12 @@
 import logging
-import multiprocessing
 import os
 import queue
 import signal
 import threading
 import time
-import traceback
+import multiprocessing as mp
 from abc import abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Union, Set
 from absl import flags
 from s2clientprotocol import sc2api_pb2 as sc_pb
 from pysc2 import run_configs
@@ -19,6 +18,8 @@ from pysc2.lib.actions import FunctionCall
 
 __author__ = 'Jesse Hostetler and Pedro Sequeira'
 __email__ = 'pedro.sequeira@sri.com'
+
+from pysc2.run_configs.lib import RunConfig
 
 FLAGS = flags.FLAGS
 flags.DEFINE_integer('step_mul', 8, 'Game steps per observation.', allow_override=True)
@@ -42,28 +43,27 @@ class DebugStepListener(object):
 
     @abstractmethod
     def start_replay(self, replay_path: str, replay_info: sc_pb.ResponseReplayInfo, player_perspective: int):
-        """ Called when starting a new replay.
-
-        Parameters:
-          `replay_name`: Path to the replay file.
-          `replay_info`: sc2api.ResponseReplayInfo protobuf message
-          `player_perspective`: Integer ID of player whose perspective we see
+        """
+        Called when starting a new replay.
+        :param str replay_path: replay file name.
+        :param ResponseReplayInfo replay_info: protobuf message.
+        :param int player_perspective: ID of player whose perspective we see observations.
         """
         pass
 
     @abstractmethod
     def finish_replay(self):
-        """ Called when finished with the current replay.
+        """
+        Called when finished with the current replay.
         """
         pass
 
     @abstractmethod
     def reset(self, pb_obs: sc_pb.ResponseObservation, agent_obs: TimeStep):
-        """ Called for the first observation of the replay.
-
-        Parameters:
-          `pb_obs`: The observation in protobuf form
-          `agent_obs`: The observation in pysc2 features
+        """
+        Called for the first observation of the replay.
+        :param pb_obs: the observation in protobuf form.
+        :param agent_obs: the observation in pysc2 features.
         """
         pass
 
@@ -74,15 +74,13 @@ class DebugStepListener(object):
              pb_obs: sc_pb.ResponseObservation,
              agent_obs: TimeStep,
              agent_actions: List[FunctionCall]):
-        """ Called after each agent action step.
-
-        Parameters:
-          `ep`: episode number
-          `step`: step number
-          `pb_obs`: The observation in protobuf form
-          `agent_obs`: The observation in pysc2 features
-          `agent_actions`: List of actions executed by the agent between the
-            previous observation and the current observation.
+        """
+        Called after each agent action step.
+        :param ep: episode number
+        :param step: step number
+        :param pb_obs: the observation in protobuf form
+        :param agent_obs: the observation in pysc2 features
+        :param agent_actions: list of actions executed by the agent between the previous observation and the current observation.
         """
         pass
 
@@ -94,7 +92,8 @@ class DebugReplayProcessor(object):
 
     @property
     def interface(self) -> sc_pb.InterfaceOptions:
-        """ Returns a sc2api.InterfaceOptions protobuf message.
+        """
+        Returns a sc2api.InterfaceOptions protobuf message.
         """
         size = point.Point(64, 64)
         interface = sc_pb.InterfaceOptions(
@@ -117,32 +116,36 @@ class DebugReplayProcessor(object):
 
     @property
     def step_mul(self) -> int:
-        """ How many game steps per agent step.
+        """
+        How many game steps per agent step.
         """
         return FLAGS.step_mul
 
     @property
     def discount(self) -> float:
-        """ MDP discount factor.
+        """
+        MDP discount factor.
         """
         return 1.0
 
     @property
     def score_index(self) -> int:
-        """ Index of the score to use for the reward. If `None`, use the outcome of
-        the game {-1, 0, 1}.
+        """
+        Index of the score to use for the reward. If `None`, use the outcome of the game {-1, 0, 1}.
 
         TODO: This is supposed to be inferred from the pysc2 `Map` instance, but
         I don't know how to determine `Map` from a replay file.
         """
         return 0
 
-    def valid_replay(self, info, ping) -> bool:
-        """ Predicate determining if a replay is valid.
-
-        Parameters:
-          `info`: ResponseReplayInfo protobuf message
-          `ping`: ResponsePing protobuf message
+    def valid_replay(self, info: sc_pb.ResponseReplayInfo, ping: sc_pb.ResponsePing, replay_path: str) -> bool:
+        """
+        Predicate determining if a replay is valid.
+        :param info: ResponseReplayInfo protobuf message.
+        :param ping: ResponsePing protobuf message.
+        :param str replay_path: the path to the replay file.
+        :rtype: bool
+        :return: whether the replay is considered valid.
         """
         return True
 
@@ -157,10 +160,16 @@ class DebugReplayProcessor(object):
 
 # ----------------------------------------------------------------------------
 
-class ReplayProcess(multiprocessing.Process):
+class ReplayProcess(mp.Process):
     """A Process that pulls replays and processes them."""
 
-    def __init__(self, proc_id, run_config, replay_queue, processor, ep_breaks, player_ids=None):
+    def __init__(self,
+                 proc_id: int,
+                 run_config: RunConfig,
+                 replay_queue: mp.JoinableQueue,
+                 processor: DebugReplayProcessor,
+                 ep_breaks: Set[int],
+                 player_ids: Optional[Union[int, List[int]]]):
         super(ReplayProcess, self).__init__()
         self.proc_id = proc_id
         self.run_config = run_config
@@ -203,7 +212,7 @@ class ReplayProcess(multiprocessing.Process):
                             # self._print((" Replay Info %s " % replay_name).center(60, "-"))
                             # self._print(info)
                             # self._print("-" * 60)
-                            if self.processor.valid_replay(info, ping):
+                            if self.processor.valid_replay(info, ping, replay_path):
                                 map_data = None
                                 if info.local_map_path:
                                     map_data = self.run_config.map_data(info.local_map_path)
@@ -401,8 +410,14 @@ class ReplayProcessRunner(object):
     """ Driver class for replay processing.
     """
 
-    def __init__(self, replay_dir, replay_processor, sc2_version=None, parallel=1,
-                 ep_break_file='episodes.csv', player_ids=None, amount=None):
+    def __init__(self,
+                 replay_dir: str,
+                 replay_processor: DebugReplayProcessor,
+                 sc2_version: Optional[str] = None,
+                 parallel: Optional[int] = 1,
+                 ep_break_file: str = 'episodes.csv',
+                 player_ids: Optional[Union[int, List[int]]] = None,
+                 amount: int = None):
         """
         Parameters:
           `replay_dir`: Directory containing replay files to process
@@ -414,7 +429,7 @@ class ReplayProcessRunner(object):
         self.replay_dir = replay_dir
         self.replay_processor = replay_processor
         self.sc2_version = sc2_version
-        self.parallel = parallel
+        self.parallel = os.cpu_count() if parallel is None or parallel <= 0 else parallel
         self.player_ids = player_ids
         self.amount = amount
 
@@ -463,7 +478,7 @@ class ReplayProcessRunner(object):
 
             logging.info('')
 
-            replay_queue = multiprocessing.JoinableQueue(self.parallel * 10)
+            replay_queue = mp.JoinableQueue(self.parallel * 10)
             replay_queue_thread = threading.Thread(target=replay_queue_filler,
                                                    args=(replay_queue, replay_list))
             replay_queue_thread.start()

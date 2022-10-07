@@ -1,3 +1,4 @@
+import os
 import io
 import logging
 import re
@@ -6,6 +7,7 @@ import tqdm
 import numpy as np
 import pandas as pd
 from typing import List
+from zipfile import ZipFile
 from feature_extractor.extractors import EPISODE_STR, REPLAY_FILE_STR, TIME_STEP_STR
 from feature_extractor.util.io import get_file_name_without_extension
 
@@ -68,6 +70,12 @@ def merge_feature_files(files: List[str], dtype=None,
                         continue
                     content = io.BytesIO(f_.read())
                     num_eps = _add_df(pd.read_csv(content), num_eps)
+        elif file.endswith('.zip'):
+            with ZipFile(file, mode='r') as z:
+                for filename in z.namelist():
+                    if not os.path.isdir(filename) and filename.endswith('.csv'):
+                        with z.open(filename) as f:
+                            num_eps = _add_df(pd.read_csv(f), num_eps)
         else:
             raise ValueError(f'Cannot load file: {file}')
 
