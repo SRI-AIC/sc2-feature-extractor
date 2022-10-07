@@ -5,19 +5,19 @@ import os
 import multiprocessing as mp
 import queue
 import time
-import skvideo
+import skvideo.io
 import tqdm
 import numpy as np
 import itertools as it
 import matplotlib.pyplot as plt
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Union, Optional, List, Any
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 from pysc2.lib import features
 from pysc2.lib.features import PlayerRelative
 from feature_extractor.replayer import ReplayProcessRunner
 from feature_extractor.util.io import save_object, load_object
-from feature_extractor.util.mp import get_pool_and_map
+from feature_extractor.util.mp import run_parallel
 from feature_extractor.visualization.location_processor import LocationTrackingProcessor, ALL_GROUP
 
 __author__ = 'Pedro Sequeira'
@@ -41,6 +41,8 @@ DPI = 600  # rasterized image dots per inch (for still images)
 ANIM_DURATION = 6  # animation duration in seconds
 ANIM_FPS = 20  # number of images / timesteps to be saved in the  animation per second
 NUM_FRAMES = ANIM_FPS * ANIM_DURATION
+
+SideGroupsHistogramList = Dict[PlayerRelative, Dict[str, List]]
 
 
 def gradient_line_legend(color_maps, labels, num_points=10, handle_length=3):
@@ -68,10 +70,20 @@ class LocationVisualizer(object):
     on a 2D grid map.
     """
 
-    def __init__(self, feature_screen, feature_minimap, action_space='RAW', feature_camera_width=24,
-                 use_feature_units=True, use_raw_units=True, use_camera_position=True,
-                 verbosity=1, parallel=1, dark=True, img_format='png',
-                 generate_animation=True, animation_format='gif'):
+    def __init__(self,
+                 feature_screen: Union[int, Tuple[int, int]],
+                 feature_minimap: Union[int, Tuple[int, int]],
+                 action_space: str = 'RAW',
+                 feature_camera_width: int = 24,
+                 use_feature_units: bool = True,
+                 use_raw_units: bool = True,
+                 use_camera_position: bool = True,
+                 verbosity: int = 1,
+                 parallel: int = -1,
+                 dark: bool = True,
+                 img_format: str = 'png',
+                 generate_animation: bool = True,
+                 animation_format: str = 'gif'):
         """
         Creates a new the location visualizer.
         :param int or Tuple[int, int] feature_screen: resolution for screen feature layers.
@@ -91,7 +103,7 @@ class LocationVisualizer(object):
         self._feature_screen_size = (feature_screen, feature_screen) \
             if isinstance(feature_screen, int) else feature_screen
         self._verbosity = verbosity
-        self._parallel = os.cpu_count() if parallel is None or parallel <= 0 else parallel
+        self._parallel = parallel
         self._dark = dark
         self._img_format = img_format
         self._generate_animation = generate_animation
@@ -107,12 +119,17 @@ class LocationVisualizer(object):
             feature_minimap=feature_minimap
         )
 
-    def visualize_replays(self, replays, friendly_groups, enemy_groups, output_dir, replay_sc2_version=None):
+    def visualize_replays(self,
+                          replays: str,
+                          friendly_groups: Dict[str, np.ndarray],
+                          enemy_groups: Dict[str, np.ndarray],
+                          output_dir: str,
+                          replay_sc2_version: Optional[str] = None):
         """
         Creates plots for the unit groups locations for the given set of replays.
         :param str replays: path to the replay file or replays directory from which to extract the units locations.
-        :param Dict[str, np.ndarray] friendly_groups: the groups of friendly unit types for which to track the location over episodes.
-        :param Dict[str, np.ndarray] enemy_groups: the groups of enemy unit types for which to track the location over episodes.
+        :param dict[str, np.ndarray] friendly_groups: the groups of friendly unit types for which to track the location over episodes.
+        :param dict[str, np.ndarray] enemy_groups: the groups of enemy unit types for which to track the location over episodes.
         :param str output_dir: path to the directory in which to save the results.
         :param str replay_sc2_version: SC2 version to use for replay.
         """
@@ -141,14 +158,14 @@ class LocationVisualizer(object):
             save_object(histogram_data, histogram_file)
 
         # creates location plots for the different friendly vs enemy combinations
-        pool, map_func = get_pool_and_map(1, True, True)
+
         # args = sorted(it.product([histogram_data], friendly_groups.keys(), enemy_groups.keys(), [output_dir]))
         args = sorted(it.product([histogram_data], [ALL_GROUP], [ALL_GROUP], [output_dir]))
-        list(tqdm.tqdm(map_func(self._plot_comb_group_locations, args), total=len(args)))
-        if pool is not None:
-            pool.close()
+        run_parallel(self._plot_comb_group_locations, args, processes=self._parallel, use_tqdm=True)
 
-    def _collect_location_data(self, replays, replay_sc2_version, friendly_groups, enemy_groups):
+    def _collect_location_data(self, replays: str, replay_sc2_version: str,
+                               friendly_groups: Dict[str, np.ndarray], enemy_groups: Dict[str, np.ndarray]) \
+            -> List[SideGroupsHistogramList]:
         # creates and runs the replay processor
         results_queue = mp.JoinableQueue()
         extractor = LocationTrackingProcessor(friendly_groups, enemy_groups, results_queue, self._aif)
@@ -170,12 +187,15 @@ class LocationVisualizer(object):
         logging.info('Done reading queue.')
         return location_data
 
-    def _generate_histogram_data(self, location_data, friendly_groups, enemy_groups):
+    def _generate_histogram_data(self, location_data: List[Dict[PlayerRelative, Dict[str, List]]],
+                                 friendly_groups: Dict[str, np.ndarray], enemy_groups: Dict[str, np.ndarray]) \
+            -> SideGroupsHistogramList:
         # organizes location data by friendly and enemy groups
         logging.info('Organizing data by groups...')
-        groups_data = {SELF: {g: [] for g in friendly_groups.keys()},
-                       ENEMY: {g: [] for g in enemy_groups.keys()},
-                       NEUTRAL: {ALL_GROUP: []}}
+        groups_data: SideGroupsHistogramList = {
+            SELF: {g: [] for g in friendly_groups.keys()},
+            ENEMY: {g: [] for g in enemy_groups.keys()},
+            NEUTRAL: {ALL_GROUP: []}}
         for ep_data in location_data:
             for side, group_locs in ep_data.items():
                 for g_name, g_locs in group_locs.items():
@@ -183,18 +203,27 @@ class LocationVisualizer(object):
                         groups_data[side][g_name].append(g_locs)
 
         # gets histograms for each unit group for each game step
-        logging.info('Computing histograms for each group and all steps...')
-        histogram_data = {SELF: {g: [] for g in friendly_groups.keys()},
-                          ENEMY: {g: [] for g in enemy_groups.keys()},
-                          NEUTRAL: {ALL_GROUP: []}}
+        histogram_data: Dict[PlayerRelative, Dict[str, Any]] = {
+            SELF: {g: [] for g in friendly_groups.keys()},
+            ENEMY: {g: [] for g in enemy_groups.keys()},
+            NEUTRAL: {ALL_GROUP: []}}
+        args = []
+        idx = 0
         for side, group_data in groups_data.items():
             for g_name, eps_loc_history in group_data.items():
-                logging.info(f'Processing {side.name} {g_name}...')
-                histogram_data[side][g_name] = self._get_histograms(eps_loc_history)
+                histogram_data[side][g_name] = idx  # remember index associated
+                args.append(eps_loc_history)
+                idx += 1
+
+        logging.info(f'Computing histograms for each group and all steps ({len(args)} total)...')
+        histograms = run_parallel(self._get_histograms, args, self._parallel, use_tqdm=True)
+        for side, idxs in histogram_data.items():
+            for g_name, idx in idxs.items():
+                histogram_data[side][g_name] = histograms[idx]
 
         return histogram_data
 
-    def _get_histograms(self, eps_loc_history):
+    def _get_histograms(self, eps_loc_history: List) -> Optional[List[Tuple[np.ndarray, np.ndarray]]]:
         # computes minimum step for which location data is available for this group
         locs_ts = [t_ranges[0][0] for ep_loc_hist in eps_loc_history for loc, t_ranges in ep_loc_hist.items()]
         if len(locs_ts) == 0:
@@ -202,14 +231,9 @@ class LocationVisualizer(object):
         min_t = min(locs_ts)
 
         # gets histograms and alpha maps for each step
-        pool, map_func = get_pool_and_map(None if self._parallel == -1 else self._parallel, True, True)
-        args = list(it.product([eps_loc_history], [max(t, min_t) for t in np.linspace(0, 1, NUM_FRAMES)]))
-        histograms = list(tqdm.tqdm(map_func(self._get_histogram, args), total=len(args)))
-        if pool is not None:
-            pool.close()
-        return histograms
+        return [self._get_histogram(eps_loc_history, max(t, min_t)) for t in np.linspace(0, 1, NUM_FRAMES)]
 
-    def _get_histogram(self, eps_loc_history, t_max: float) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_histogram(self, eps_loc_history: List, t_max: float) -> Tuple[np.ndarray, np.ndarray]:
         # initialize histograms
         histogram = np.zeros(np.array(self._feature_screen_size) + 1)
         counts = np.zeros(np.array(self._feature_screen_size) + 1)
@@ -232,7 +256,8 @@ class LocationVisualizer(object):
 
         return histogram, counts
 
-    def _plot_comb_group_locations(self, groups_histograms, friendly_group, enemy_group, output_dir):
+    def _plot_comb_group_locations(self, groups_histograms: Dict[PlayerRelative, Dict[str, List]],
+                                   friendly_group: str, enemy_group: str, output_dir: str):
         title = f'Friendly {friendly_group.title()} vs Enemy {enemy_group.title()} '
         logging.info(f'Processing frames for {title}...')
         groups_histograms = {SELF: groups_histograms[SELF][friendly_group],
@@ -246,7 +271,7 @@ class LocationVisualizer(object):
             self._save_animation(groups_histograms, title, f'{file_name}.{self._animation_format}')
         gc.collect()
 
-    def _save_animation(self, groups_histograms, title, output_video):
+    def _save_animation(self, groups_histograms: Dict[PlayerRelative, List], title: str, output_video: str):
         if groups_histograms[SELF] is None and groups_histograms[ENEMY] is None and groups_histograms[NEUTRAL] is None:
             return
         if os.path.exists(output_video):
@@ -268,9 +293,10 @@ class LocationVisualizer(object):
             return
         self._render_image(groups_histograms, -1, output_img, title)
 
-    def _render_image(self, groups_histograms, t_index, output_img, title):
+    def _render_image(self, groups_histograms: Dict[PlayerRelative, List], t_index: int,
+                      output_img: Optional[str], title: str):
 
-        def _get_histogram(side: PlayerRelative) -> Tuple[np.ndarray or None, np.ndarray or None]:
+        def _get_histogram(side: PlayerRelative) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
             if groups_histograms[side] is not None:
                 histogram, counts = groups_histograms[side][t_index]
                 # friendly_counts = groups_histograms[SELF][t_index]

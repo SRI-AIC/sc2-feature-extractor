@@ -59,15 +59,15 @@ def _convert_unit_filter(config: FeatureExtractorConfig, unit_filter: List[str o
 def main(unused_argv):
     args = FLAGS
 
+    # try to load config, save it in output dir and load unit group filters
+    if not os.path.isfile(args.config):
+        raise ValueError(f'Configuration file does not exist: {args.config}')
+
     # checks output dir and files
     create_clear_dir(args.output, args.clear)
     change_log_handler(os.path.join(args.output, 'loc-visualizer.log'), args.verbosity)
     save_dict_json({a: args[a].value if hasattr(args[a], 'value') else str(args[a]) for a in args},
                    os.path.join(args.output, 'args.json'))
-
-    # try to load config, save it in output dir and load unit group filters
-    if not os.path.isfile(args.config):
-        raise ValueError(f'Configuration file does not exist: {args.config}')
 
     config = FeatureExtractorConfig.load_json(args.config)
     config.save_json(os.path.join(args.output, os.path.basename(args.config)))
