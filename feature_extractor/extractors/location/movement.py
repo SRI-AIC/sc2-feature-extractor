@@ -19,9 +19,8 @@ class _RelativeMovementExtractor(FeatureExtractor):
     either advancing or retreating.
     """
 
-    def __init__(self, config, categorical, force_label, own_filter, other_filter, alliance_self):
+    def __init__(self, config, force_label, own_filter, other_filter, alliance_self):
         super().__init__(config)
-        self._categorical = categorical
         self._force_label = force_label
         self._alliance_self = alliance_self
 
@@ -48,26 +47,31 @@ class _RelativeMovementExtractor(FeatureExtractor):
 
     def features_labels(self) -> List[str]:
         labels = []
-        for own_g, other_g in self._group_combs:
-            if self._categorical:
+        if self.config.movement_categorical:
+            for own_g, other_g in self._group_combs:
                 labels.append(f'Advancing_{self._force_label}_{own_g}_{other_g}')
                 labels.append(f'Retreating_{self._force_label}_{own_g}_{other_g}')
-            else:
+        if self.config.movement_numeric:
+            for own_g, other_g in self._group_combs:
                 labels.append(f'Velocity_{self._force_label}_{own_g}_{other_g}')
                 labels.append(f'Angle_{self._force_label}_{own_g}_{other_g}')
         return labels
 
     def features_descriptors(self) -> List[FeatureDescriptor]:
-        if self._categorical:
-            return [FeatureDescriptor(lbl, FeatureType.Boolean) for lbl in self.features_labels()]
-        else:
-            desc = []
+        descriptors = []
+        if self.config.movement_categorical:
             for own_g, other_g in self._group_combs:
-                desc.append(FeatureDescriptor(
+                descriptors.append(FeatureDescriptor(
+                    f'Advancing_{self._force_label}_{own_g}_{other_g}', FeatureType.Boolean))
+                descriptors.append(FeatureDescriptor(
+                    f'Retreating_{self._force_label}_{own_g}_{other_g}', FeatureType.Boolean))
+        if self.config.movement_numeric:
+            for own_g, other_g in self._group_combs:
+                descriptors.append(FeatureDescriptor(
                     f'Velocity_{self._force_label}_{own_g}_{other_g}', FeatureType.Real, [0., 1.]))
-                desc.append(FeatureDescriptor(
+                descriptors.append(FeatureDescriptor(
                     f'Angle_{self._force_label}_{own_g}_{other_g}', FeatureType.Real, [0., np.pi]))
-            return desc
+        return descriptors
 
     def extract(self, ep: int, step: int, obs: NamedDict, pb_obs: ResponseObservation) -> \
             List[Union[bool, int, float, str]]:
@@ -105,35 +109,42 @@ class _RelativeMovementExtractor(FeatureExtractor):
 
         # updates movement features
         features = []
-        for own_g, other_g in self._group_combs:
-            speed = self._own_speeds[own_g]
-            center = self._own_centers[own_g]
-            target = self._other_centers[other_g]
+        if self.config.movement_categorical:
+            for own_g, other_g in self._group_combs:
+                speed = self._own_speeds[own_g]
+                center = self._own_centers[own_g]
+                target = self._other_centers[other_g]
+                if speed is None or target is None:
+                    features.extend([DEFAULT_FEATURE_VAL, DEFAULT_FEATURE_VAL]) # no units of one or both sides
+                    continue
 
-            if speed is None or target is None:
-                # no units of one or both sides
-                if self._categorical:
-                    features.extend([DEFAULT_FEATURE_VAL, DEFAULT_FEATURE_VAL])
+                # calculate relative direction
+                abs_speed = np.linalg.norm(speed)
+                angle_to_target = np.arccos(
+                    np.clip(np.dot(unit_vector(speed), unit_vector(target - center)), -1., 1.))
+                if abs_speed <= self.config.velocity_threshold:
+                    features.extend([False, False])  # not enough speed
+                elif self.config.advance_angle_thresh[0] <= angle_to_target < self.config.advance_angle_thresh[1]:
+                    features.extend([True, False])  # advancing towards target
+                elif self.config.retreat_angle_thresh[0] < angle_to_target <= self.config.retreat_angle_thresh[1]:
+                    features.extend([False, True])  # retreating from target
                 else:
+                    features.extend([False, False])  # force is moving, but not relative to target
+
+        if self.config.movement_numeric:
+            for own_g, other_g in self._group_combs:
+                speed = self._own_speeds[own_g]
+                center = self._own_centers[own_g]
+                target = self._other_centers[other_g]
+                if speed is None or target is None:
                     features.extend([np.nan, np.nan])  # no units of one of the sides
-                continue
+                    continue
 
-            # calculate relative direction
-            abs_speed = np.linalg.norm(speed)
-            angle_to_target = np.arccos(
-                np.clip(np.dot(unit_vector(speed), unit_vector(target - center)), -1., 1.))
-
-            if not self._categorical:
-                # return relative velocity, angle
+                # calculate relative direction, return relative velocity, angle
+                abs_speed = np.linalg.norm(speed)
+                angle_to_target = np.arccos(
+                    np.clip(np.dot(unit_vector(speed), unit_vector(target - center)), -1., 1.))
                 features.extend([min(1, abs_speed / self.config.max_velocity), angle_to_target])
-            elif abs_speed <= self.config.velocity_threshold:
-                features.extend([False, False])  # not enough speed
-            elif self.config.advance_angle_thresh[0] <= angle_to_target < self.config.advance_angle_thresh[1]:
-                features.extend([True, False])  # advancing towards target
-            elif self.config.retreat_angle_thresh[0] < angle_to_target <= self.config.retreat_angle_thresh[1]:
-                features.extend([False, True])  # retreating from target
-            else:
-                features.extend([False, False])  # force is moving, but not relative to target
 
         self._prev_step = step
         return features
@@ -144,8 +155,8 @@ class FriendlyRelativeMovementExtractor(_RelativeMovementExtractor):
     Captures relative movement for friendly units in relation to enemy units.
     """
 
-    def __init__(self, config: FeatureExtractorConfig, categorical: bool):
-        super().__init__(config, categorical, FRIENDLY_STR,
+    def __init__(self, config: FeatureExtractorConfig):
+        super().__init__(config, FRIENDLY_STR,
                          config.friendly_move_friendly_filter, config.friendly_move_enemy_filter,
                          alliance_self=True)
 
@@ -155,7 +166,7 @@ class EnemyRelativeMovementExtractor(_RelativeMovementExtractor):
     Captures relative movement for enemy units in relation to friendly units.
     """
 
-    def __init__(self, config: FeatureExtractorConfig, categorical: bool):
-        super().__init__(config, categorical, ENEMY_STR,
+    def __init__(self, config: FeatureExtractorConfig):
+        super().__init__(config, ENEMY_STR,
                          config.enemy_move_enemy_filter, config.enemy_move_friendly_filter,
                          alliance_self=False)

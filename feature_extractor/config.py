@@ -163,6 +163,16 @@ class FeatureExtractorConfig(object):
                  unit_costs: Dict[IntEnum, List[float]],
                  max_friendly_units: Dict[IntEnum, int],
                  max_enemy_units: Dict[IntEnum, int],
+                 unit_group_categorical: bool, unit_group_numeric: bool,
+                 distance_categorical: bool, distance_numeric: bool,
+                 force_factor_categorical: bool, force_factor_numeric: bool,
+                 force_relative_categorical: bool, force_relative_numeric: bool,
+                 concentration_categorical: bool, concentration_numeric: bool,
+                 elevation_categorical: bool, elevation_numeric: bool,
+                 under_attack_categorical: bool, under_attack_numeric: bool,
+                 movement_categorical: bool, movement_numeric: bool,
+                 between_categorical: bool, between_numeric: bool,
+                 orders_categorical: bool, orders_numeric: bool,
                  unit_group_friendly_filter: List[Union[str, IntEnum]],
                  unit_group_enemy_filter: List[Union[str, IntEnum]],
                  distance_friendly_filter: List[Union[str, IntEnum]],
@@ -254,6 +264,27 @@ class FeatureExtractorConfig(object):
         self.friendly_id = friendly_id
         self.groups = groups
         self.unit_costs = unit_costs
+
+        self.unit_group_categorical = unit_group_categorical
+        self.unit_group_numeric = unit_group_numeric
+        self.distance_categorical = distance_categorical
+        self.distance_numeric = distance_numeric
+        self.force_factor_categorical = force_factor_categorical
+        self.force_factor_numeric = force_factor_numeric
+        self.force_relative_categorical = force_relative_categorical
+        self.force_relative_numeric = force_relative_numeric
+        self.concentration_categorical = concentration_categorical
+        self.concentration_numeric = concentration_numeric
+        self.elevation_categorical = elevation_categorical
+        self.elevation_numeric = elevation_numeric
+        self.under_attack_categorical = under_attack_categorical
+        self.under_attack_numeric = under_attack_numeric
+        self.movement_categorical = movement_categorical
+        self.movement_numeric = movement_numeric
+        self.between_categorical = between_categorical
+        self.between_numeric = between_numeric
+        self.orders_categorical = orders_categorical
+        self.orders_numeric = orders_numeric
 
         self.max_friendly_units = max_friendly_units
         self.max_enemy_units = max_enemy_units

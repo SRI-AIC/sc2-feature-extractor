@@ -22,22 +22,30 @@ class DistanceExtractor(FeatureExtractor):
     between any two units of each force in those groups.
     """
 
-    def __init__(self, config: FeatureExtractorConfig, categorical: bool):
+    def __init__(self, config: FeatureExtractorConfig):
         super().__init__(config)
-        self._categorical = categorical
         self._friendly_filter = self._convert_unit_filter(self.config.distance_friendly_filter)
         self._enemy_filter = self._convert_unit_filter(self.config.distance_enemy_filter)
         self._group_combs = list(it.product(self._friendly_filter.keys(), self._enemy_filter.keys()))
 
     def features_labels(self) -> List[str]:
-        return [f'Distance_{fg}_{eg}' for fg, eg in self._group_combs]
+        labels = []
+        if self.config.distance_categorical:
+            labels = [f'DistanceCat_{fg}_{eg}' for fg, eg in self._group_combs]
+        if self.config.distance_numeric:
+            labels.extend([f'Distance_{fg}_{eg}' for fg, eg in self._group_combs])
+        return labels
 
     def features_descriptors(self) -> List[FeatureDescriptor]:
-        if self._categorical:
+        descriptors = []
+        if self.config.distance_categorical:
+            labels = [f'DistanceCat_{fg}_{eg}' for fg, eg in self._group_combs]
             feat_values = [DEFAULT_FEATURE_VAL, MELEE_STR, CLOSE_STR, FAR_STR]
-            return [FeatureDescriptor(lbl, FeatureType.Categorical, feat_values) for lbl in self.features_labels()]
-        else:
-            return [FeatureDescriptor(lbl, FeatureType.Real, [0., 1.]) for lbl in self.features_labels()]
+            descriptors = [FeatureDescriptor(lbl, FeatureType.Categorical, feat_values) for lbl in labels]
+        if self.config.distance_numeric:
+            labels = [f'Distance_{fg}_{eg}' for fg, eg in self._group_combs]
+            descriptors.extend([FeatureDescriptor(lbl, FeatureType.Real, [0., 1.]) for lbl in labels])
+        return descriptors
 
     def extract(self, ep: int, step: int, obs: NamedDict, pb_obs: ResponseObservation) -> \
             List[Union[bool, int, float, str]]:
@@ -58,16 +66,20 @@ class DistanceExtractor(FeatureExtractor):
         dists = []
         map_size = pb_obs.observation.raw_data.map_state.visibility.size
         max_len = np.linalg.norm([map_size.x, map_size.y])
-        for min_dist in min_dists:
-            dist = DEFAULT_FEATURE_VAL
-            if not self._categorical:
-                dist = np.nan if min_dist == np.finfo(np.float).max else min(1, min_dist / max_len)
-            elif min_dist <= max_len * self.config.melee_range_ratio:
-                dist = MELEE_STR
-            elif min_dist <= max_len * self.config.close_range_ratio:
-                dist = CLOSE_STR
-            elif min_dist <= max_len * self.config.far_range_ratio:
-                dist = FAR_STR
-            dists.append(dist)
+
+        if self.config.distance_categorical:
+            for min_dist in min_dists:
+                dist = DEFAULT_FEATURE_VAL
+                if min_dist <= max_len * self.config.melee_range_ratio:
+                    dist = MELEE_STR
+                elif min_dist <= max_len * self.config.close_range_ratio:
+                    dist = CLOSE_STR
+                elif min_dist <= max_len * self.config.far_range_ratio:
+                    dist = FAR_STR
+                dists.append(dist)
+
+        if self.config.distance_numeric:
+            for min_dist in min_dists:
+                dists.append(np.nan if min_dist == np.finfo(np.float).max else min(1, min_dist / max_len))
 
         return dists

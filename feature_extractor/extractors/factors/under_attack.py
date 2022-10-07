@@ -18,9 +18,8 @@ class UnderAttackExtractor(FeatureExtractor):
     sum of their health is decreasing between consecutive timesteps.
     """
 
-    def __init__(self, config: FeatureExtractorConfig, categorical: bool):
+    def __init__(self, config: FeatureExtractorConfig):
         super().__init__(config)
-        self._categorical = categorical
         self._friendly_filter = self._convert_unit_filter(self.config.under_attack_friendly_filter)
         self._enemy_filter = self._convert_unit_filter(self.config.under_attack_enemy_filter)
         self._first_obs = True
@@ -34,18 +33,28 @@ class UnderAttackExtractor(FeatureExtractor):
 
     def features_labels(self) -> List[str]:
         labels = []
-        for g in self._friendly_filter:
-            labels.append(f'UnderAttack_{FRIENDLY_STR}_{g}')
-        for g in self._enemy_filter:
-            labels.append(f'UnderAttack_{ENEMY_STR}_{g}')
+        if self.config.under_attack_categorical:
+            labels.extend([f'Attacking_{ENEMY_STR}_Red_{g}' for g in self._friendly_filter])
+            labels.extend([f'Attacking_{FRIENDLY_STR}_Blue_{g}' for g in self._enemy_filter])
+        if self.config.under_attack_numeric:
+            labels.extend([f'HealthDiff_{FRIENDLY_STR}_{g}' for g in self._friendly_filter])
+            labels.extend([f'HealthDiff_{ENEMY_STR}_{g}' for g in self._enemy_filter])
         return labels
 
     def features_descriptors(self) -> List[FeatureDescriptor]:
-        if self._categorical:
-            return [FeatureDescriptor(lbl, FeatureType.Boolean) for lbl in self.features_labels()]
-        else:
-            return [FeatureDescriptor(lbl, FeatureType.Real, [np.finfo(np.float).min, np.finfo(np.float).max])
-                    for lbl in self.features_labels()]
+        descriptors = []
+        if self.config.under_attack_categorical:
+            descriptors.extend([FeatureDescriptor(f'Attacking_{ENEMY_STR}_Red_{g}', FeatureType.Boolean)
+                                for g in self._friendly_filter])
+            descriptors.extend([FeatureDescriptor(f'Attacking_{FRIENDLY_STR}_Blue_{g}', FeatureType.Boolean)
+                                for g in self._enemy_filter])
+        if self.config.under_attack_numeric:
+            val_range = [np.finfo(np.float).min, np.finfo(np.float).max]
+            descriptors.extend([FeatureDescriptor(f'HealthDiff_{FRIENDLY_STR}_{g}', FeatureType.Real, val_range)
+                                for g in self._friendly_filter])
+            descriptors.extend([FeatureDescriptor(f'HealthDiff_{ENEMY_STR}_{g}', FeatureType.Real, val_range)
+                                for g in self._enemy_filter])
+        return descriptors
 
     def extract(self, ep: int, step: int, obs: NamedDict, pb_obs: ResponseObservation) -> \
             List[Union[bool, int, float, str]]:
@@ -58,19 +67,34 @@ class UnderAttackExtractor(FeatureExtractor):
 
         # updates under attack feature for each unit group and faction
         features = []
+        if self.config.under_attack_categorical:
+            for g_filter, health, prev_health in \
+                    [(self._friendly_filter, friendly_health, self._prev_friendly_health),
+                     (self._enemy_filter, enemy_health, self._prev_enemy_health)]:
+                for g in g_filter:
+                    if health[g] is None or prev_health[g] is None:
+                        features.append(DEFAULT_FEATURE_VAL)
+                    else:
+                        # return whether agent is losing health
+                        features.append(not self._first_obs and health[g] < prev_health[g])
+
+        if self.config.under_attack_numeric:
+            for g_filter, health, prev_health in \
+                    [(self._friendly_filter, friendly_health, self._prev_friendly_health),
+                     (self._enemy_filter, enemy_health, self._prev_enemy_health)]:
+                for g in g_filter:
+                    if health[g] is None or prev_health[g] is None:
+                        features.append(np.nan)
+                    else:
+                        # return difference in health (loss)
+                        features.append(0. if self._first_obs else health[g] - prev_health[g])
+                    prev_health[g] = health[g]
+
+        # set prev health as current health
         for g_filter, health, prev_health in \
                 [(self._friendly_filter, friendly_health, self._prev_friendly_health),
                  (self._enemy_filter, enemy_health, self._prev_enemy_health)]:
             for g in g_filter:
-                if health[g] is None or prev_health[g] is None:
-                    features.append(DEFAULT_FEATURE_VAL if self._categorical else np.nan)
-                else:
-                    if self._categorical:
-                        # return whether agent is losing health
-                        features.append(not self._first_obs and health[g] < prev_health[g])
-                    else:
-                        # return difference in health
-                        features.append(0. if self._first_obs else health[g] - prev_health[g])
                 prev_health[g] = health[g]
 
         self._first_obs = False

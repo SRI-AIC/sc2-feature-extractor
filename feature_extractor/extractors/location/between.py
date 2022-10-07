@@ -42,9 +42,8 @@ class BetweenExtractor(FeatureExtractor):
     within different groups.
     """
 
-    def __init__(self, config: FeatureExtractorConfig, categorical: bool):
+    def __init__(self, config: FeatureExtractorConfig):
         super().__init__(config)
-        self._categorical = categorical
         self._friendly_filter = self._convert_unit_filter(self.config.between_friendly_filter)
         self._enemy_filter = self._convert_unit_filter(self.config.between_enemy_filter)
         self._barrier_filter = self._convert_unit_filter(self.config.between_barrier_filter)
@@ -52,13 +51,22 @@ class BetweenExtractor(FeatureExtractor):
             self._barrier_filter.keys(), self._friendly_filter.keys(), self._enemy_filter.keys()))
 
     def features_labels(self) -> List[str]:
-        return [f'Between_{bg}_{fg}_{eg}' for bg, fg, eg in self._group_combs]
+        labels = []
+        if self.config.between_categorical:
+            labels.extend([f'IsBetween_{bg}_{fg}_{eg}' for bg, fg, eg in self._group_combs])
+        if self.config.between_numeric:
+            labels.extend([f'Between_{bg}_{fg}_{eg}' for bg, fg, eg in self._group_combs])
+        return labels
 
     def features_descriptors(self) -> List[FeatureDescriptor]:
-        if self._categorical:
-            return [FeatureDescriptor(lbl, FeatureType.Boolean) for lbl in self.features_labels()]
-        else:
-            return [FeatureDescriptor(lbl, FeatureType.Real, [0., 1.]) for lbl in self.features_labels()]
+        descriptors = []
+        if self.config.between_categorical:
+            descriptors.extend([FeatureDescriptor(f'IsBetween_{bg}_{fg}_{eg}', FeatureType.Boolean)
+                                for bg, fg, eg in self._group_combs])
+        if self.config.between_numeric:
+            descriptors.extend([FeatureDescriptor(f'Between_{bg}_{fg}_{eg}', FeatureType.Real, [0., 1.])
+                                for bg, fg, eg in self._group_combs])
+        return descriptors
 
     def extract(self, ep: int, step: int, obs: NamedDict, pb_obs: ResponseObservation) -> \
             List[Union[bool, int, float, str]]:
@@ -70,48 +78,56 @@ class BetweenExtractor(FeatureExtractor):
 
         # update barrier-between feature
         features = []
-        for bg, fg, eg in self._group_combs:
 
-            # checks for empty groups
-            if len(friendly_locs[fg]) == 0 or len(enemy_locs[eg]) == 0 or len(barrier_locs[bg]) == 0:
-                features.append(DEFAULT_FEATURE_VAL if self._categorical else np.nan)
-                continue
+        def _add_features(cat):
+            for bg, fg, eg in self._group_combs:
 
-            # removes enemy locations from barrier group (to avoid self-obstruction)
-            barrier_group_locs = []
-            for barrier_loc in barrier_locs[bg]:
-                loc_compare = barrier_loc == enemy_locs[eg]
-                if not np.any(np.logical_and(loc_compare[:, 0], loc_compare[:, 1])):
-                    barrier_group_locs.append(barrier_loc)
+                # checks for empty groups
+                if len(friendly_locs[fg]) == 0 or len(enemy_locs[eg]) == 0 or len(barrier_locs[bg]) == 0:
+                    features.append(DEFAULT_FEATURE_VAL if cat else np.nan)
+                    continue
 
-            # checks for empty group
-            if len(barrier_group_locs) == 0:
-                features.append(DEFAULT_FEATURE_VAL if self._categorical else np.nan)
-                continue
+                # removes enemy locations from barrier group (to avoid self-obstruction)
+                barrier_group_locs = []
+                for barrier_loc in barrier_locs[bg]:
+                    loc_compare = barrier_loc == enemy_locs[eg]
+                    if not np.any(np.logical_and(loc_compare[:, 0], loc_compare[:, 1])):
+                        barrier_group_locs.append(barrier_loc)
 
-            # determines min number of pairs that have to be blocked by a barrier unit
-            num_pairs = len(friendly_locs[fg]) * len(enemy_locs[eg])
-            min_between_pairs = int(num_pairs * self.config.between_units_ratio)
-            between_pairs = 0
-            num_unchecked_pairs = num_pairs
-            for friendly_loc, enemy_loc in product(friendly_locs[fg], enemy_locs[eg]):
+                # checks for empty group
+                if len(barrier_group_locs) == 0:
+                    features.append(DEFAULT_FEATURE_VAL if cat else np.nan)
+                    continue
 
-                # if barrier was found between these 2 units, increase counter
-                if _is_on_path(barrier_group_locs, friendly_loc, enemy_loc, self.config.barrier_angle_threshold):
-                    between_pairs += 1
+                # determines min number of pairs that have to be blocked by a barrier unit
+                num_pairs = len(friendly_locs[fg]) * len(enemy_locs[eg])
+                min_between_pairs = int(num_pairs * self.config.between_units_ratio)
+                between_pairs = 0
+                num_unchecked_pairs = num_pairs
+                for friendly_loc, enemy_loc in product(friendly_locs[fg], enemy_locs[eg]):
 
-                if self._categorical:
-                    # if categorical/boolean, checks for early termination:
-                    # we either have enough between pairs or no way of getting enough between pairs
-                    num_unchecked_pairs -= 1
-                    if between_pairs >= min_between_pairs or (between_pairs + num_unchecked_pairs) < min_between_pairs:
-                        break
+                    # if barrier was found between these 2 units, increase counter
+                    if _is_on_path(barrier_group_locs, friendly_loc, enemy_loc, self.config.barrier_angle_threshold):
+                        between_pairs += 1
 
-            if self._categorical:
-                # the feature is True only if there is a barrier between a minimum number of pairs of units
-                features.append(between_pairs >= min_between_pairs)
-            else:
-                # return barrier between ratio
-                features.append(between_pairs / num_pairs)
+                    if cat:
+                        # if categorical/boolean, checks for early termination:
+                        # we either have enough between pairs or no way of getting enough between pairs
+                        num_unchecked_pairs -= 1
+                        if between_pairs >= min_between_pairs or (
+                                between_pairs + num_unchecked_pairs) < min_between_pairs:
+                            break
+
+                if cat:
+                    # the feature is True only if there is a barrier between a minimum number of pairs of units
+                    features.append(between_pairs >= min_between_pairs)
+                else:
+                    # return barrier between ratio
+                    features.append(between_pairs / num_pairs)
+
+        if self.config.between_categorical:
+            _add_features(cat=True)
+        if self.config.between_numeric:
+            _add_features(cat=False)
 
         return features
