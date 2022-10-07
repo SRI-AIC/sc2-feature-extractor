@@ -1,4 +1,4 @@
-from typing import Tuple, Callable, Dict
+from typing import Tuple, Callable, Dict, Union, Optional, Literal, get_args
 import numpy as np
 import scipy.stats as stats
 import scipy.spatial.distance as distance
@@ -433,9 +433,9 @@ def gaussian_pdf(x: np.ndarray, mu: np.ndarray, sigma: np.ndarray, diagonal: boo
     return pdf
 
 
-def discretize_gaussian(mu: float or np.ndarray, sigma: float or np.ndarray, n_bins: int = 100,
-                        lower: float or np.ndarray = None, upper: float or np.ndarray = None,
-                        coverage: float or np.ndarray = None) -> Tuple[np.ndarray, np.ndarray]:
+def discretize_gaussian(mu: Union[float, np.ndarray], sigma: Union[float, np.ndarray], n_bins: int = 100,
+                        lower: Union[float, np.ndarray] = None, upper: Union[float, np.ndarray] = None,
+                        coverage: Union[float, np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Discretizes one or more Gaussian distributions into N bins according to the given parameters.
     :param float or np.ndarray mu: the Gaussian's mean value(s).
@@ -474,8 +474,8 @@ def discretize_gaussian(mu: float or np.ndarray, sigma: float or np.ndarray, n_b
     return np.moveaxis(bins, 0, -1), np.moveaxis(probs, 0, -1)  # final shapes: (batch, n_bins)
 
 
-def discretize_uniform(low: float or np.ndarray, high: float or np.ndarray, n_bins: int = 100,
-                       lower: float or np.ndarray = None, upper: float or np.ndarray = None) \
+def discretize_uniform(low: Union[float, np.ndarray], high: Union[float, np.ndarray], n_bins: int = 100,
+                       lower: Union[float, np.ndarray] = None, upper: Union[float, np.ndarray] = None) \
         -> Tuple[np.ndarray, np.ndarray]:
     """
     Discretizes a uniform distribution into N bins according to the given parameters.
@@ -502,8 +502,143 @@ def discretize_uniform(low: float or np.ndarray, high: float or np.ndarray, n_bi
     return np.moveaxis(bins, 0, -1), np.moveaxis(probs, 0, -1)  # final shapes: (batch, n_bins)
 
 
-def normalized_derivative(y: np.ndarray, x: np.ndarray or float = 1, order: int = 1, accuracy: int = 2) -> \
-        np.ndarray:
+FiniteDiffType = Literal['backward', 'center', 'forward']
+
+
+def _fd_coefficients_non_uni(order: int, accuracy: int, x: np.ndarray, idx: int, fd_type: FiniteDiffType = 'center') \
+        -> Dict[str, Union[np.ndarray, int]]:
+    """
+    Modified version of findiff.coefs.coefficients_non_uni to allow specifying type of finite difference.
+    """
+    assert order > 0, f'Order has to be greater than 0, {order} provided.'
+    assert accuracy > 0 and accuracy % 2 == 0, f'Accuracy has to be a positive, even number, but {accuracy} provided.'
+    assert fd_type in get_args(FiniteDiffType), \
+        f'Unknown finite difference type: {fd_type}, options are: {get_args(FiniteDiffType)}'
+
+    from findiff.coefs import _build_matrix_non_uniform, _build_rhs
+
+    num_central = 2 * np.floor((order + 1) / 2) - 1 + accuracy
+
+    if fd_type == 'center':
+        num_side = int(num_central // 2)
+        matrix = _build_matrix_non_uniform(num_side, num_side, x, idx)
+        offsets = np.arange(-num_side, num_side + 1)
+        rhs = _build_rhs(offsets, order)
+        return dict(coefficients=np.linalg.solve(matrix, rhs), offsets=offsets, accuracy=accuracy)
+
+    num_coef = int(num_central + 1 if order % 2 == 0 else num_central)
+
+    if fd_type == 'backward':
+        matrix = _build_matrix_non_uniform(num_coef - 1, 0, x, idx)
+        offsets = np.arange(-num_coef + 1, 1)
+        rhs = _build_rhs(offsets, order)
+        return dict(coefficients=np.linalg.solve(matrix, rhs), offsets=offsets, accuracy=accuracy)
+
+    # forward
+    matrix = _build_matrix_non_uniform(0, num_coef - 1, x, idx)
+    offsets = np.arange(num_coef)
+    rhs = _build_rhs(offsets, order)
+    return dict(coefficients=np.linalg.solve(matrix, rhs), offsets=offsets, accuracy=accuracy)
+
+
+def _fd_coefficients_uni(order: int, accuracy: int, fd_type: FiniteDiffType = 'center') \
+        -> Dict[str, Union[np.ndarray, int]]:
+    """
+    Copy of  findiff.coefs.coefficients to allow specifying type of finite difference.
+    """
+    assert order > 0, f'Order has to be greater than 0, {order} provided.'
+    assert accuracy > 0 and accuracy % 2 == 0, f'Accuracy has to be a positive, even number, but {accuracy} provided.'
+    assert fd_type in get_args(FiniteDiffType), \
+        f'Unknown finite difference type: {fd_type}, options are: {get_args(FiniteDiffType)}'
+
+    from findiff.coefs import calc_coefs
+
+    num_central = 2 * np.floor((order + 1) / 2) - 1 + accuracy
+
+    if fd_type == 'center':
+        # center
+        num_side = int(num_central // 2)
+        offsets = np.arange(-num_side, num_side + 1)
+        return calc_coefs(order, offsets, symbolic=False)
+
+    num_coef = int(num_central + 1 if order % 2 == 0 else num_central)
+
+    if fd_type == 'backward':
+        offsets = np.arange(-num_coef + 1, 1)
+        return calc_coefs(order, offsets, symbolic=False)
+
+    # forward
+    offsets = np.arange(num_coef)
+    return calc_coefs(order, offsets, symbolic=False)
+
+
+def finite_diff(y: np.ndarray,
+                x: Optional[Union[np.ndarray, float]] = 1.,
+                order: int = 1,
+                accuracy: int = 2,
+                fd_type: FiniteDiffType = 'center',
+                default_value: float = np.nan) -> np.ndarray:
+    """
+    Computes the finite difference numerical derivative of a function based on the given samples.
+    See: https://en.wikipedia.org/wiki/Finite_difference
+    :param np.ndarray y: the input array with the function sample values to be derived.
+    :param np.ndarray x: the x-coordinates corresponding to each y value, or the uniform spacing value.
+    If `None`, it is assumed that the data is on a uniform grid of size 1.
+    :param int order: the order of the derivative to be computed, default is 1.
+    :param int accuracy: the finite difference accuracy (has to be a positive even number), default is 2.
+    :param str fd_type: the type of finite difference to compute which dictates where to sample points to estimate
+    the derivatives.
+    :param float default_value: the default value to be returned at points where the derivative cannot be estimated.
+    :rtype: np.ndarray
+    :return: an array with the same shape as the input array containing the derivative's values.
+    """
+    assert x is None or not isinstance(x, np.ndarray) or x.shape == y.shape, \
+        f'Shapes of `x` and `y` have to be the same, but got {x.shape} and {y.shape}, respectively.'
+    assert order > 0, f'Order has to be greater than 0, {order} provided.'
+    assert accuracy > 0 and accuracy % 2 == 0, f'Accuracy has to be a positive, even number, but {accuracy} provided.'
+    assert fd_type in get_args(FiniteDiffType), \
+        f'Unknown finite difference type: {fd_type}, options are: {get_args(FiniteDiffType)}'
+
+    if x is None:
+        x = 1.
+
+    num_central = 2 * np.floor((order + 1) / 2) - 1 + accuracy
+    num_coef = num_central + 1 if order % 2 == 0 else num_central
+    num_side = num_central // 2
+
+    def _insuf_data(idx):
+        return ((fd_type == 'backward' and idx < num_coef - 1) or
+                (fd_type == 'center' and (idx < num_side or idx >= len(y) - num_side)) or
+                (fd_type == 'forward' and idx > len(y) - num_coef))
+
+    # check uniformity of space
+    dy_dx = np.full_like(y, default_value, dtype=np.float64)
+    if isinstance(x, np.ndarray):
+        # non-uniform grid, diff coefficients for each index
+        for idx in range(len(y)):
+            if _insuf_data(idx):
+                continue  # ignore, not enough data
+            coefs = _fd_coefficients_non_uni(order, accuracy, x, idx, fd_type)
+            dy_dx[idx] = np.dot(y[idx + coefs['offsets']], coefs['coefficients'])
+    else:
+        # uniform grid space, same coefficients for all indices
+        coefs = _fd_coefficients_uni(order, accuracy, fd_type)
+        offsets = coefs['offsets']
+        coefs = float(x) ** -order * coefs['coefficients']
+        for idx in range(len(y)):
+            if _insuf_data(idx):
+                continue  # ignore, not enough data
+            dy_dx[idx] = np.dot(y[idx + offsets], coefs)
+
+    return dy_dx
+
+
+def normalized_derivative(y: np.ndarray,
+                          x: Optional[Union[np.ndarray, float]] = 1.,
+                          order: int = 1,
+                          accuracy: int = 2,
+                          fd_type: FiniteDiffType = 'center',
+                          default_value: float = np.nan) -> np.ndarray:
     """
     Computes the n-th derivative of the given array using a finite difference numerical method, and then normalizes
     the derivative using the sine function (of the angle whose tangent is given by the derivative).
@@ -512,20 +647,19 @@ def normalized_derivative(y: np.ndarray, x: np.ndarray or float = 1, order: int 
     If `None`, it is assumed that the data is on a uniform grid of size 1.
     :param int order: the order of the derivative to be computed, default is 1.
     :param int accuracy: the finite difference accuracy (has to be a positive even number), default is 2.
-    :rtype np.ndarray
-    :return: an array with the derivative's sine-normalized values the same shape as the input array.
+    :param str fd_type: the type of finite difference to compute which dictates where to sample points to estimate
+    the derivatives.
+    :param float default_value: the default value to be returned at points where the derivative cannot be estimated.
+    :rtype: np.ndarray
+    :return: an array with the same shape as the input array containing the derivative's sine-normalized values.
     """
     assert x is None or not isinstance(x, np.ndarray) or x.shape == y.shape, \
         f'Shapes of `x` and `y` have to be the same, but got {x.shape} and {y.shape}, respectively.'
     assert order > 0, f'Order has to be greater than 0, {order} provided.'
-    assert accuracy > 0 and accuracy % 2 == 0, f'Accuracy has to be a positive, even number, {accuracy} provided.'
-
-    from findiff import FinDiff
+    assert accuracy > 0 and accuracy % 2 == 0, f'Accuracy has to be a positive, even number, but {accuracy} provided.'
 
     # gets finite difference of given order and accuracy
-    dx = x if x is not None else 1
-    d_dx = FinDiff(0, dx, order, acc=accuracy)
-    dy_dx = d_dx(y)
+    dy_dx = finite_diff(y, x, order, accuracy, fd_type, default_value)
 
     # computes angles and get sine
     angles = np.arctan(dy_dx)

@@ -1,28 +1,47 @@
 import gzip
 import json
-import logging
 import os
 import pickle
 import re
 import shutil
 import tempfile
 import zipfile
+import numpy as np
 from typing import List, Dict
 
 __author__ = 'Pedro Sequeira'
 __email__ = 'pedro.sequeira@sri.com'
 
 
-def get_file_changed_extension(file_path: str, ext: str) -> str:
+class _NpEncoder(json.JSONEncoder):
+    """
+    Supports encoding of numpy data types.
+    See: https://stackoverflow.com/a/57915246/16031961
+    """
+
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
+
+def get_file_changed_extension(file_path: str, ext: str, prefix: str = '', suffix: str = '') -> str:
     """
     Changes the extension of the given file.
     :param str file_path: the path to the file.
     :param str ext: the new file extension.
+    :param str prefix: the prefix to add to the resulting file name.
+    :param str suffix: the suffix to add to the resulting file name.
     :rtype: str
     :return: the file path with the new extension.
     """
+    ext = ext.replace('.', '')
     return os.path.join(os.path.dirname(file_path),
-                        '{}.{}'.format(get_file_name_without_extension(file_path), ext.replace('.', '')))
+                        f'{prefix}{get_file_name_without_extension(file_path)}{suffix}.{ext}')
 
 
 def get_file_name_without_extension(file_path: str) -> str:
@@ -90,7 +109,7 @@ def save_dict_json(dictionary: Dict, file_path: str):
     :param str file_path: the path to the json file where to save the dictionary.
     """
     with open(file_path, 'w') as fp:
-        json.dump(dictionary, fp, indent=4)
+        json.dump(dictionary, fp, indent=4, cls=_NpEncoder)
 
 
 def save_object(obj, file_path: str, compress_gzip: bool = True):
@@ -177,3 +196,42 @@ def extract_files(file_path: str, output_dir: str = None) -> str:
     with zipfile.ZipFile(file_path, mode='r') as zf:
         zf.extractall(str(output_dir))
     return output_dir
+
+
+def replace_lines(file_path: str, pattern: str, subst: str, keep_old: bool = True):
+    """
+    Replaces lines matching the given pattern in a text file.
+    From: https://stackoverflow.com/a/39110/16031961
+    :param str file_path: the path to the file in which to replace the lines.
+    :param str pattern: the text pattern to be replaced.
+    :param str subst: the text to replace whenever the pattern is found.
+    :param bool keep_old: whether to keep a backup of the old file in the same directory.
+    :return:
+    """
+    # checks file
+    if not os.path.isfile(file_path):
+        raise ValueError(f'Cannot find specified file: {file_path}')
+
+    # create temp file
+    fh, abs_path = tempfile.mkstemp()
+    with os.fdopen(fh, 'w') as new_file:
+        with open(file_path) as old_file:
+            for line in old_file:
+                new_file.write(line.replace(pattern, subst))
+
+    # copy the file permissions from the old file to the new file
+    shutil.copymode(file_path, abs_path)
+
+    # rename or remove original file
+    if keep_old:
+        i = 1
+        backup_file = f'{file_path}.bak'
+        while os.path.isfile(backup_file):
+            backup_file = f'{file_path}.bak{i}'
+            i += 1
+        shutil.move(file_path, backup_file)
+    else:
+        os.remove(file_path)
+
+    # move new file
+    shutil.move(abs_path, file_path)

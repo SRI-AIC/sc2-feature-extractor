@@ -1,5 +1,7 @@
 import os
+import colorsys
 import tempfile
+import warnings
 import numpy as np
 import pandas as pd
 import scipy.stats as st
@@ -23,6 +25,10 @@ ERROR_AREA_LINE_WIDTH = 0
 ERROR_BAR_THICKNESS = 1
 ERROR_BAR_WIDTH = 6
 RADAR_ALPHA = 0.4
+ALL_FONT_SIZE = 16
+AXES_TITLE_FONT_SIZE = 18
+TITLE_FONT_SIZE = 24
+LEGEND_ALPHA = 0.7
 
 
 class ErrorStat(IntEnum):
@@ -40,37 +46,40 @@ def _get_mean_error_stat(data: Union[np.ndarray, pd.DataFrame, DataFrameGroupBy]
                          axis: int = None) -> Union[Tuple[np.ndarray, np.ndarray],
                                                     Tuple[pd.DataFrame, pd.DataFrame],
                                                     Tuple[pd.Series, pd.Series]]:
-    # gets mean std dev according to type
-    if isinstance(data, np.ndarray):
-        mean = np.nanmean(data, axis=axis)
-        std = np.nanstd(data, axis=axis)
-        n = data.shape[axis or 0]
-    elif isinstance(data, pd.DataFrame):
-        mean = data.mean(axis=axis, skipna=True)
-        std = data.std(axis=axis, skipna=True)
-        n = data.shape[axis or 0]
-    elif isinstance(data, DataFrameGroupBy):
-        mean = data.mean()
-        std = data.std()
-        n = data.ngroups
-    else:
-        raise ValueError(f'Data type not supported: {data}')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', category=RuntimeWarning)  # avoid empty slice warnings
 
-    # gets error stat
-    if error_stat == ErrorStat.StdDev:
-        return mean, std
-    if error_stat == ErrorStat.StdError:
-        return mean, std / np.sqrt(n)
-    if error_stat == ErrorStat.CI95 or error_stat == ErrorStat.CI99:
-        # gets the confidence interval (CI)
-        # see: https://vedexcel.com/how-to-calculate-confidence-intervals-in-python/
-        alpha = 0.95 if error_stat == ErrorStat.CI95 else 0.99
-        if n < 30:
-            ci = st.t.interval(alpha=alpha, df=n - 1, loc=mean, scale=std / np.sqrt(n))
+        # gets mean std dev according to type
+        if isinstance(data, np.ndarray):
+            mean = np.nanmean(data, axis=axis)
+            std = np.nanstd(data, axis=axis)
+            n = data.shape[axis or 0]
+        elif isinstance(data, pd.DataFrame):
+            mean = data.mean(axis=axis, skipna=True)
+            std = data.std(axis=axis, skipna=True)
+            n = data.shape[axis or 0]
+        elif isinstance(data, DataFrameGroupBy):
+            mean = data.mean()
+            std = data.std()
+            n = data.ngroups
         else:
-            ci = st.norm.interval(alpha=alpha, loc=mean, scale=std / np.sqrt(n))
-        return mean, np.abs(mean - ci[0])
-    raise ValueError(f'Unknown error statistic: {error_stat}')
+            raise ValueError(f'Data type not supported: {data}')
+
+        # gets error stat
+        if error_stat == ErrorStat.StdDev:
+            return mean, std
+        if error_stat == ErrorStat.StdError:
+            return mean, std / np.sqrt(n)
+        if error_stat == ErrorStat.CI95 or error_stat == ErrorStat.CI99:
+            # gets the confidence interval (CI)
+            # see: https://vedexcel.com/how-to-calculate-confidence-intervals-in-python/
+            alpha = 0.95 if error_stat == ErrorStat.CI95 else 0.99
+            if n < 30:
+                ci = st.t.interval(alpha=alpha, df=n - 1, loc=mean, scale=std / np.sqrt(n))
+            else:
+                ci = st.norm.interval(alpha=alpha, loc=mean, scale=std / np.sqrt(n))
+            return mean, np.abs(mean - ci[0])
+        raise ValueError(f'Unknown error statistic: {error_stat}')
 
 
 def plot_timeseries(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
@@ -94,9 +103,12 @@ def plot_timeseries(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
                     reverse_x_axis: bool = False,
                     y_min: Optional[float] = None,
                     y_max: Optional[float] = None,
+                    log_y: bool = False,
                     smooth_factor: float = 0.,
+                    markers: bool = False,
                     show_legend: bool = True,
-                    show_plot: bool = False) -> go.Figure:
+                    show_plot: bool = False,
+                    **kwargs) -> go.Figure:
     """
     Plots several time-series in the same line plot, representing the "evolution" of some variables over time.
     :param pd.DataFrame data: the object containing the data to be plotted. If a `dict` is given, then each key
@@ -135,10 +147,13 @@ def plot_timeseries(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
     :param bool reverse_x_axis: whether to reverse the order of values in the x-axis.
     :param float y_min: the minimal value of the y-axis.
     :param float y_max: the maximal value of the y-axis.
+    :param bool log_y: whether the y-axis is log-scaled in cartesian coordinates.
     :param float smooth_factor: the smoothing factor in [0, 1[ for the timeseries curves using exponential weighted mean.
+    :param bool markers: whether to show markers in addition to lines at points in which there is data.
     :param bool show_legend: whether to show the plot's legend.
     :param bool show_plot: whether to show the plot, in which case a new browser tab would be opened displaying the
     interactive Plotly plot.
+    :param kwargs: extra arguments passed to `format_and_save_plot`.
     :rtype: go.Figure
     :return: the Plotly figure created with the given data.
     """
@@ -197,15 +212,19 @@ def plot_timeseries(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
 
     # checks color palette, discretize if needed
     colors = palette
-    if isinstance(colors, str):
-        colors = px.colors.sample_colorscale(palette, np.linspace(0, 1, len(data.columns)))
+    num_colors = len(data.columns) if isinstance(data, pd.DataFrame) else len(data)
+    if isinstance(colors, str) or (isinstance(colors, list) and num_colors > len(colors) > 1):
+        colors = px.colors.sample_colorscale(colors, np.linspace(0, 1, num_colors))
+
+    # convert all colors to rgb format to allows playing with alpha
+    colors = px.colors.convert_colors_to_same_type(colors, colortype='rgb')[0]
 
     # plots data, see https://plotly.com/python/wide-form/#wideform-defaults
     fig = px.line(data, title=title,
                   labels={'index': x_label or 'Index',
                           'value': y_label or 'Value',
                           'variable': var_label or 'Variable'},
-                  template=template, color_discrete_sequence=colors)
+                  log_y=log_y, template=template, color_discrete_sequence=colors, markers=markers)
 
     # plots average (std) error via shaded area
     if average and plot_avg_error:
@@ -215,11 +234,12 @@ def plot_timeseries(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
             non_nan = np.cumsum(~np.isnan(shape.y))
             max_idx, = np.where(non_nan == non_nan[-1])
             max_idx = max_idx[0] + 1
-            err = err_data[shape.name][:max_idx]
             x = shape.x[:max_idx]
             y = shape.y[:max_idx]
-            err = err[~np.isnan(y)]  # remove where y=nan to avoid incorrect error region
+            err = err_data[shape.name].values[:max_idx]
             x = x[~np.isnan(y)]
+            err = err[~np.isnan(y)]  # remove where y=nan to avoid incorrect error region
+            err[np.isnan(err)] = 0  # also set points with undefined error to 0
             y = y[~np.isnan(y)]
             fig.add_trace(
                 go.Scatter(
@@ -233,6 +253,7 @@ def plot_timeseries(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
                     legendgroup=shape.legendgroup,
                     xaxis=shape.xaxis,
                     yaxis=shape.yaxis,
+                    mode='lines'  # no markers
                 )
             )
 
@@ -257,7 +278,8 @@ def plot_timeseries(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
         fig.update_xaxes(autorange='reversed')
     fig.update_layout(yaxis_range=[y_min, y_max])
     format_and_save_plot(
-        fig, data_plus_err, title, output_img, save_csv, False, save_json, width, height, show_legend, show_plot)
+        fig, data_plus_err, title, output_img, save_csv, False, save_json, width, height, show_legend, show_plot,
+        **kwargs)
 
     return fig
 
@@ -280,8 +302,11 @@ def plot_bar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]],
              group_norm: bool = False,
              y_min: Optional[float] = None,
              y_max: Optional[float] = None,
+             log_y: bool = False,
+             orientation: Optional[str] = None,
              show_legend: bool = False,
-             show_plot: bool = False) -> go.Figure:
+             show_plot: bool = False,
+             **kwargs) -> go.Figure:
     """
     Plots several variables in the same bar chart.
     :param pd.DataFrame data: the object containing the data to be plotted. If a `dict` is given, then each key
@@ -313,9 +338,12 @@ def plot_bar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]],
     a stacked bars plot, each value representing a percentage.
     :param float y_min: the minimal value of the y-axis.
     :param float y_max: the maximal value of the y-axis.
+    :param bool log_y: whether the y-axis is log-scaled in cartesian coordinates.
+    :param str orientation: orientation of the bar chart, one of ['h','v'].
     :param bool show_legend: whether to show the plot's legend.
     :param bool show_plot: whether to show the plot, in which case a new browser tab would be opened displaying the
     interactive Plotly plot.
+    :param kwargs: extra arguments passed to `format_and_save_plot`.
     :rtype: go.Figure
     :return: the Plotly figure created with the given data.
     """
@@ -343,8 +371,8 @@ def plot_bar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]],
 
     # checks color palette, discretize if needed
     colors = palette
-    if isinstance(colors, str):
-        num_colors = len(data.columns) if is_grouped else len(data)
+    num_colors = len(data.columns) if is_grouped else len(data)
+    if isinstance(colors, str) or (isinstance(colors, list) and num_colors > len(colors) > 1):
         colors = px.colors.sample_colorscale(palette, np.linspace(0, 1, num_colors))
 
     # plots data
@@ -354,7 +382,8 @@ def plot_bar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]],
                          'variable': x_label or 'Variable'},
                  barmode='group' if is_grouped and not group_norm else 'relative',
                  color=None if is_grouped else data.index,
-                 color_discrete_sequence=colors, template=template)
+                 orientation=orientation,
+                 log_y=log_y, color_discrete_sequence=colors, template=template)
 
     # updates error bars
     visible = bool(plot_error and pd.notna(err_data).sum().sum() > 0)
@@ -366,8 +395,12 @@ def plot_bar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]],
     # plots mean
     if plot_mean and len(data) > 1:
         y_mean = np.nanmean(data.values)  # add horizontal line with mean value
-        fig.add_hline(y=y_mean, line_width=2, line_dash='dash', line_color='grey',
-                      annotation_text='Mean', annotation_position='bottom right')
+        if orientation == 'h':
+            fig.add_vline(x=y_mean, line_width=2, line_dash='dash', line_color='grey',
+                          annotation_text='Mean', annotation_position='bottom right')
+        else:
+            fig.add_hline(y=y_mean, line_width=2, line_dash='dash', line_color='grey',
+                          annotation_text='Mean', annotation_position='bottom right')
 
     # merge data and errors
     err_data = pd.DataFrame(err_data, index=data.index)
@@ -375,9 +408,14 @@ def plot_bar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]],
     data_plus_err = pd.concat([data, err_data], axis=1)
 
     # format and save plot
-    fig.update_layout(yaxis_range=[y_min, y_max])
+    if orientation == 'h':
+        fig.update_layout(xaxis_range=[y_min, y_max])
+    else:
+        fig.update_layout(yaxis_range=[y_min, y_max])
+
     format_and_save_plot(
-        fig, data_plus_err, title, output_img, save_csv, True, save_json, width, height, show_legend, show_plot)
+        fig, data_plus_err, title, output_img, save_csv, True, save_json, width, height, show_legend, show_plot,
+        **kwargs)
 
     return fig
 
@@ -400,8 +438,10 @@ def plot_histogram(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
                    group_by: str = None,
                    x_min: Optional[float] = None,
                    x_max: Optional[float] = None,
+                   log_x: bool = False,
                    show_legend: bool = True,
-                   show_plot: bool = False) -> go.Figure:
+                   show_plot: bool = False,
+                   **kwargs) -> go.Figure:
     """
     Plots several variables in the same histogram plot, representing the "distribution" over values.
     :param pd.DataFrame data: the object containing the data to be plotted. If a `dict` is given, then each key
@@ -432,9 +472,11 @@ def plot_histogram(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
     data and not over all variables.
     :param float x_min: the minimal value of the x-axis, i.e., the variables' values.
     :param float x_max: the maximal value of the x-axis, i.e., the variables' values.
+    :param bool log_x: whether the y-axis is log-scaled in cartesian coordinates.
     :param bool show_legend: whether to show the plot's legend.
     :param bool show_plot: whether to show the plot, in which case a new browser tab would be opened displaying the
     interactive Plotly plot.
+    :param kwargs: extra arguments passed to `format_and_save_plot`.
     :rtype: go.Figure
     :return: the Plotly figure created with the given data.
     """
@@ -453,8 +495,10 @@ def plot_histogram(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
 
     # checks color palette, discretize if needed
     colors = palette
-    if isinstance(colors, str):
-        colors = px.colors.sample_colorscale(palette, np.linspace(0, 1, len(data.columns)))
+    if (isinstance(colors, str) or
+            (isinstance(colors, list) and
+             (len(data.columns) if isinstance(data, pd.DataFrame) else len(data)) > len(colors) > 1)):
+        colors = px.colors.sample_colorscale(colors, np.linspace(0, 1, len(data.columns)))
 
     # plots data
     fig = px.histogram(data, title=title,
@@ -462,6 +506,7 @@ def plot_histogram(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
                                'variable': var_label or 'Variable'},
                        nbins=n_bins,
                        range_x=None if x_min is None or x_max is None else [x_min, x_max],
+                       log_x=log_x,
                        histnorm='probability density' if normalize else None,
                        color_discrete_sequence=colors,
                        template=template)
@@ -478,9 +523,11 @@ def plot_histogram(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
             counts, _ = np.histogram(y_vals, bins=x_vals)
             x_vals = x_vals[:-1] + 0.5 * (x_vals[1:] - x_vals[:-1])
 
+            # checks color palette, discretize if needed
             colors = palette
-            if isinstance(colors, str):
-                colors = px.colors.sample_colorscale(palette, np.linspace(0, 1, len(x_vals)))
+            if (isinstance(colors, str) or
+                    (isinstance(colors, list) and len(x_vals) > len(colors) > 1)):
+                colors = px.colors.sample_colorscale(colors, np.linspace(0, 1, len(x_vals)))
 
             # create a bar plot by hand
             fig = px.bar(x=x_vals, y=counts,
@@ -488,6 +535,7 @@ def plot_histogram(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
                          labels={'x': x_label or 'x',
                                  'y': y_label or 'y'},
                          range_x=None if x_min is None or x_max is None else [x_min, x_max],
+                         log_x=log_x,
                          color=colors,
                          color_discrete_map='identity',
                          template=template)
@@ -508,7 +556,8 @@ def plot_histogram(data: Union[pd.DataFrame, Dict[str, np.ndarray]],
 
     # format and save plot
     format_and_save_plot(
-        fig, data, title, output_img, save_csv, False, save_json, width, height, show_legend, show_plot)
+        fig, data, title, output_img, save_csv, False, save_json, width, height, show_legend, show_plot,
+        **kwargs)
 
     return fig
 
@@ -530,8 +579,9 @@ def plot_matrix(data: Union[pd.DataFrame, np.ndarray],
                 show_values: bool = True,
                 z_min: Optional[float] = None,
                 z_max: Optional[float] = None,
-                show_legend: bool = True,
-                show_plot: bool = False) -> go.Figure:
+                symmetrical: bool = False,
+                show_plot: bool = False,
+                **kwargs) -> go.Figure:
     """
     Plots a given matrix of values in a heatmap plot.
     :param pd.DataFrame data: the object containing the data to be plotted. If a `numpy.array` is given, then it is
@@ -555,9 +605,11 @@ def plot_matrix(data: Union[pd.DataFrame, np.ndarray],
     :param bool show_values: whether to show the matrix entries' values.
     :param float z_min: the minimum value of data that defines the color scale.
     :param float z_max: the maximum value of data that defines the color scale.
-    :param bool show_legend: whether to show the plot's legend.
+    :param bool symmetrical: whether the given data represents a symmetrical, square matrix, i.e., where
+    `data[i,j]==data[j,i]`. If `True`, then only the bottom half will be displayed.
     :param bool show_plot: whether to show the plot, in which case a new browser tab would be opened displaying the
     interactive Plotly plot.
+    :param kwargs: extra arguments passed to `format_and_save_plot`.
     :rtype: go.Figure
     :return: the Plotly figure created with the given data.
     """
@@ -567,12 +619,28 @@ def plot_matrix(data: Union[pd.DataFrame, np.ndarray],
 
     # normalize data
     if normalize:
+        data = data.astype(float, copy=True)
         min_val = data.min().min()
         max_val = data.max().max()
         norm_values = (data.values - min_val) / (max_val - min_val)  # normalize to [0-1]
         if z_min is not None and z_max is not None:
             norm_values = z_min + norm_values * (z_max - z_min)  # normalize to given range
         data.values[:] = norm_values
+
+    # checks symmetrical matrix
+    values_text = None
+    if symmetrical and data.shape[0] == data.shape[1]:
+        idxs = np.indices((data.shape[0], data.shape[1]))
+        data = data.copy()
+        data.values[np.where(idxs[1] > idxs[0])] = np.nan  # "remove" value for upper right coordinates
+
+        # hide top and right grid outline
+        kwargs.update(dict(xaxis=dict(mirror=False), yaxis=dict(mirror=False)))
+
+        if show_values:
+            # trick to hide values for upper right coordinates, otherwise will show as "0.00"
+            values_text = data.apply(lambda s: s.apply(lambda x: f'{x:.2f}')).values
+            values_text[np.where(idxs[1] > idxs[0])] = ''
 
     # plots data
     fig = px.imshow(data,
@@ -581,12 +649,21 @@ def plot_matrix(data: Union[pd.DataFrame, np.ndarray],
                     zmin=z_min, zmax=z_max,
                     color_continuous_scale=palette,
                     template=template,
-                    text_auto='.2f' if show_values else False)
+                    text_auto=False if not show_values else True if 'int' in str(data.dtypes[0]) else '.2f')
 
-    fig.update_layout(coloraxis_showscale=show_scale)
+    if values_text is not None:
+        fig.update_traces(text=values_text, texttemplate='%{text}')  # do not use text_auto, set labels manually
+
+    # show color bar and hide grid lines
+    fig.update_layout(coloraxis_showscale=show_scale,
+                      coloraxis_colorbar=dict(outlinecolor='black', outlinewidth=1, title=None),
+                      xaxis_showgrid=False, yaxis_showgrid=False,
+                      xaxis_zeroline=False, yaxis_zeroline=False)
 
     # format and save plot
-    format_and_save_plot(fig, data, title, output_img, save_csv, True, save_json, width, height, show_legend, show_plot)
+    format_and_save_plot(
+        fig, data, title, output_img, save_csv, True, save_json, width, height, False, show_plot,
+        **kwargs)
 
     return fig
 
@@ -607,7 +684,8 @@ def plot_radar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]
                min_val: Optional[float] = None,
                max_val: Optional[float] = None,
                show_legend: bool = False,
-               show_plot: bool = False) -> go.Figure:
+               show_plot: bool = False,
+               **kwargs) -> go.Figure:
     """
     Plots several variables in the same radar (spider, star) chart. Each data column corresponds to a polar axis in the
     plot, while the value is determined by averaging each series across the rows. To plot multiple traces in the same
@@ -636,6 +714,7 @@ def plot_radar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]
     :param bool show_legend: whether to show the plot's legend.
     :param bool show_plot: whether to show the plot, in which case a new browser tab would be opened displaying the
     interactive Plotly plot.
+    :param kwargs: extra arguments passed to `format_and_save_plot`.
     :rtype: go.Figure
     :return: the Plotly figure created with the given data.
     """
@@ -659,8 +738,12 @@ def plot_radar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]
 
     # checks color palette, discretize if needed
     colors = palette
-    if isinstance(colors, str):
-        colors = px.colors.sample_colorscale(palette, np.linspace(0, 1, len(data)))
+    if (isinstance(colors, str) or
+            (isinstance(colors, list) and len(data) > len(colors) > 1)):
+        colors = px.colors.sample_colorscale(colors, np.linspace(0, 1, len(data)))
+
+    # convert all colors to rgb format to allows playing with alpha
+    colors = px.colors.convert_colors_to_same_type(colors, colortype='rgb')[0]
 
     # plots data, one scatter polar plot per row
     fig = go.Figure()
@@ -694,14 +777,17 @@ def plot_radar(data: Union[pd.DataFrame, Dict[str, np.ndarray], Dict[str, float]
         polar=dict(
             radialaxis=dict(
                 visible=True,
+                showline=False,
                 range=[min_val, max_val] if min_val is not None and max_val is not None else None
-            )),
+            ),
+            angularaxis=dict(gridcolor='darkgrey', linecolor='black')
+        ),
     )
 
     # format and save plot
     format_and_save_plot(fig, data, title, output_img, save_csv, True, save_json,
                          width, height, show_legend, show_plot,
-                         dict(l=0, r=0, b=20, t=35))
+                         margin=dict(l=0, r=0, b=20, t=35), **kwargs)
 
     return fig
 
@@ -717,7 +803,11 @@ def format_and_save_plot(fig: go.Figure,
                          height: Optional[int] = 600,
                          show_legend: bool = True,
                          show_plot: bool = False,
-                         margin: Optional[Dict[str, float]] = None):
+                         margin: Optional[Dict[str, float]] = None,
+                         font_size: Optional[int] = ALL_FONT_SIZE,
+                         title_font_size: Optional[int] = TITLE_FONT_SIZE,
+                         axes_title_font_size: Optional[int] = AXES_TITLE_FONT_SIZE,
+                         **layout_kwargs):
     """
     Formats the given plot according to the common "look-and-feel" of the library, and optionally saves the figure to
     files with different formats.
@@ -734,13 +824,11 @@ def format_and_save_plot(fig: go.Figure,
     :param bool show_plot: whether to show the plot, in which case a new browser tab would be opened displaying the
     interactive Plotly plot.
     :param dict margin: the figure's margin parameters (l, r, t, b).
+    :param int font_size: the default font size for all figure elements.
+    :param int title_font_size: the font size of the figure title.
+    :param int axes_title_font_size: the font size of the axes' titles.
+    :param layout_kwargs: the extra arguments to pass to `update_layout` of the figure.
     """
-    # tweaks layout
-    axis_layout = dict(mirror=True, ticks='outside', showline=True, linecolor='black', title=dict(standoff=10))
-    margin = margin if margin is not None else dict(l=0, r=0, b=0, t=30 if title else 0)
-    fig.update_layout(showlegend=show_legend, legend_itemclick='toggle',
-                      xaxis=axis_layout, yaxis=axis_layout, margin=margin)
-
     # saves to csv
     if data is not None and save_csv and output_img is not None:
         data.to_csv(get_file_changed_extension(output_img, 'csv'), index=save_index)
@@ -750,12 +838,27 @@ def format_and_save_plot(fig: go.Figure,
         with open(get_file_changed_extension(output_img, 'json'), 'w') as fp:
             fp.write(fig.to_json())
 
+    # tweaks layout
+    axis_layout = dict(mirror=True, ticks='outside', showline=True, linecolor='black', title=dict(standoff=10))
+    margin = margin if margin is not None else dict(l=0, r=0, b=0, t=title_font_size + 12 if title else 0)
+    fig.update_layout(showlegend=show_legend, legend_itemclick='toggle',
+                      legend=dict(bordercolor='black', borderwidth=1, bgcolor=f'rgba(1.0,1.0,1.0,{LEGEND_ALPHA})'),
+                      xaxis=axis_layout, yaxis=axis_layout, margin=margin,
+                      width=width, height=height)
+
+    fig.update_layout(**layout_kwargs)  # update layout with custom params separately
+
     if show_plot:
         fig.show()
 
     # saves to image file
     if output_img is not None:
-        fig.update_layout(width=width, height=height)
+        fig = go.Figure(fig)  # makes copy to change fonts only for printing
+        fig.update_layout(
+            font_size=font_size,
+            title_font_size=title_font_size,
+            xaxis_title_font_size=axes_title_font_size,
+            yaxis_title_font_size=axes_title_font_size)
         fig.write_image(output_img)
 
 
@@ -773,3 +876,14 @@ def dummy_plotly(sleep: float = 0.5):
         plot_timeseries(df, average=True, output_img=path)
         import time
         time.sleep(sleep)
+
+
+def distinct_colors(n: int) -> List[str]:
+    """
+    Generates N visually-distinct colors.
+    :param int n: the number of colors to generate.
+    :rtype: list[str]
+    :return: a list of plotly colors in the rgb(R, G, B) format.
+    """
+    return ['rgb(' + ','.join([str(int(255 * x)) for x in colorsys.hls_to_rgb(i / n, .65, .9)]) + ')'
+            for i in range(n)]

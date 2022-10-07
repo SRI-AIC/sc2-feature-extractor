@@ -1,7 +1,8 @@
 import argparse
 import logging
 from enum import IntEnum
-from interestingness_xdrl.util.io import save_dict_json
+from typing import Optional
+from ..util.io import save_dict_json
 
 __author__ = 'Pedro Sequeira'
 __email__ = 'pedro.sequeira@sri.com'
@@ -56,3 +57,22 @@ def str2log_level(v: str or int) -> int:
         return logging.WARN if v == 0 else logging.INFO if v == 1 else logging.DEBUG if v == 2 else v
 
     raise argparse.ArgumentTypeError('Valid log level expected.')
+
+
+class ErrorMsgArgumentParser(argparse.ArgumentParser):
+    """
+    Simple class override to control for error and thus avoid exiting the server.
+    See: https://stackoverflow.com/a/16942165/16031961
+    """
+
+    def __init__(self, prog=None, usage=None, description=None, epilog=None, parents=[],
+                 formatter_class=argparse.HelpFormatter, prefix_chars='-', fromfile_prefix_chars=None,
+                 argument_default=None, conflict_handler='error', add_help=True, allow_abbrev=True):
+        super().__init__(prog, usage, description, epilog, parents, formatter_class, prefix_chars,
+                         fromfile_prefix_chars, argument_default, conflict_handler, add_help, allow_abbrev)
+
+        self.error_msg: Optional[str] = None
+
+    def error(self, message):
+        # stores error message instead of exiting
+        self.error_msg = message
