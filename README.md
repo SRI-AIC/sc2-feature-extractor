@@ -51,8 +51,8 @@
 # Installation
 
 ```bash
-git checkout https://gitlab.sri.com/caml/feature-extractor.git
-cd feature-extractor
+git checkout https://github.com/SRI-AIC/sc2-feature-extractor.git
+cd sc2-feature-extractor
 pip install -e .[windows, macos]
 ```
 
